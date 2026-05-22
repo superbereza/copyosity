@@ -3,10 +3,11 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import type { ClipboardEntry, Collection } from "$lib/types";
+  import type { ClickAction, ClipboardEntry, Collection } from "$lib/types";
   import {
     getEntries,
     getCollections,
+    getAppSettings,
     hideMainWindow,
     openSettingsWindow,
   } from "$lib/api";
@@ -24,7 +25,19 @@
   let gridEl: HTMLDivElement | undefined = $state();
   let visible = $state(false);
   let revealCycle = $state(0);
+  let singleClickAction = $state<ClickAction>("copy");
+  let doubleClickAction = $state<ClickAction>("paste");
   const hiddenTopTags = new Set(["code", "otp", "token", "log"]);
+
+  async function loadBehaviorSettings() {
+    try {
+      const s = await getAppSettings();
+      singleClickAction = (s.single_click_action as ClickAction) ?? "copy";
+      doubleClickAction = (s.double_click_action as ClickAction) ?? "paste";
+    } catch (e) {
+      console.error("Failed to load behavior settings", e);
+    }
+  }
 
   async function loadEntries() {
     entries = await getEntries({
@@ -73,6 +86,7 @@
   onMount(() => {
     loadEntries();
     loadCollections();
+    loadBehaviorSettings();
 
     // Tell Rust we're loaded — it will hide the off-screen warmup window
     invoke("frontend_ready");
@@ -89,6 +103,7 @@
 
     const unlistenShow = listen("window-show", () => {
       showWindow();
+      loadBehaviorSettings();
     });
 
     const unlistenOpenSettings = listen("open-settings", () => {
@@ -271,6 +286,8 @@
           <ClipboardCard
             {entry}
             selected={i === selectedIndex}
+            {singleClickAction}
+            {doubleClickAction}
             onpasted={handlePasted}
             ondeleted={handleEntryAction}
             onpinned={handleEntryAction}

@@ -21,6 +21,8 @@ export interface Collection {
   sort_order: number;
 }
 
+export type ClickAction = "copy" | "paste" | "none";
+
 export interface AppSettings {
   ollama_model: string;
   retention_days: number;
@@ -29,6 +31,10 @@ export interface AppSettings {
   whisper_server_model: string;
   voice_shortcut: string;
   selected_microphone: string;
+  main_shortcut: string;
+  show_in_dock: boolean;
+  single_click_action: ClickAction;
+  double_click_action: ClickAction;
 }
 
 export interface AudioInputDevice {

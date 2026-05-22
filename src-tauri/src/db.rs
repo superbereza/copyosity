@@ -3,6 +3,48 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ClickAction {
+    Copy,
+    Paste,
+    None,
+}
+
+impl ClickAction {
+    fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Copy => "copy",
+            Self::Paste => "paste",
+            Self::None => "none",
+        }
+    }
+
+    fn from_db_str(s: &str) -> Option<Self> {
+        match s {
+            "copy" => Some(Self::Copy),
+            "paste" => Some(Self::Paste),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct AppSettingsUpdate<'a> {
+    pub ollama_model: Option<&'a str>,
+    pub retention_days: Option<i64>,
+    pub whisper_server_url: Option<&'a str>,
+    pub whisper_server_token: Option<&'a str>,
+    pub whisper_server_model: Option<&'a str>,
+    pub voice_shortcut: Option<&'a str>,
+    pub selected_microphone: Option<&'a str>,
+    pub main_shortcut: Option<&'a str>,
+    pub show_in_dock: Option<bool>,
+    pub single_click_action: Option<ClickAction>,
+    pub double_click_action: Option<ClickAction>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
     pub ollama_model: String,
@@ -10,10 +52,12 @@ pub struct AppSettings {
     pub whisper_server_url: String,
     pub whisper_server_token: String,
     pub whisper_server_model: String,
-    /// e.g. "option+space", "cmd+space", "ctrl+alt+space"
     pub voice_shortcut: String,
-    /// Selected microphone device name (empty = default)
     pub selected_microphone: String,
+    pub main_shortcut: String,
+    pub show_in_dock: bool,
+    pub single_click_action: ClickAction,
+    pub double_click_action: ClickAction,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -160,73 +204,95 @@ impl Database {
     }
 
     pub fn get_app_settings(&self) -> Result<AppSettings, rusqlite::Error> {
-        let ollama_model = self
-            .get_setting("ollama_model")?
-            .unwrap_or_else(|| "qwen3:4b-instruct-2507-q4_K_M".to_string());
-        let retention_days = self
-            .get_setting("retention_days")?
-            .and_then(|value| value.parse::<i64>().ok())
-            .filter(|days| matches!(*days, 1 | 7 | 30 | 180))
-            .unwrap_or(30);
+        use std::collections::HashMap;
 
-        let whisper_server_url = self
-            .get_setting("whisper_server_url")?
-            .unwrap_or_default();
-        let whisper_server_token = self
-            .get_setting("whisper_server_token")?
-            .unwrap_or_default();
-        let whisper_server_model = self
-            .get_setting("whisper_server_model")?
-            .unwrap_or_else(|| "whisper-1".to_string());
+        const KEYS: &[&str] = &[
+            "ollama_model",
+            "retention_days",
+            "whisper_server_url",
+            "whisper_server_token",
+            "whisper_server_model",
+            "voice_shortcut",
+            "selected_microphone",
+            "main_shortcut",
+            "show_in_dock",
+            "single_click_action",
+            "double_click_action",
+        ];
 
-        let voice_shortcut = self
-            .get_setting("voice_shortcut")?
-            .unwrap_or_else(|| "option+space".to_string());
-        let selected_microphone = self
-            .get_setting("selected_microphone")?
-            .unwrap_or_default();
+        let conn = self.conn.lock().unwrap();
+        let placeholders = vec!["?"; KEYS.len()].join(",");
+        let sql = format!("SELECT key, value FROM settings WHERE key IN ({})", placeholders);
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = KEYS.iter().map(|k| k as &dyn rusqlite::types::ToSql).collect();
+        let mut map: HashMap<String, String> = HashMap::new();
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (k, v) = row?;
+            map.insert(k, v);
+        }
+        drop(stmt);
+        drop(conn);
+
+        let take = |key: &str| map.get(key).cloned();
+        let parse_bool = |s: &str| s == "1" || s.eq_ignore_ascii_case("true");
 
         Ok(AppSettings {
-            ollama_model,
-            retention_days,
-            whisper_server_url,
-            whisper_server_token,
-            whisper_server_model,
-            voice_shortcut,
-            selected_microphone,
+            ollama_model: take("ollama_model").unwrap_or_else(|| "qwen3:4b-instruct-2507-q4_K_M".to_string()),
+            retention_days: take("retention_days")
+                .and_then(|v| v.parse::<i64>().ok())
+                .filter(|d| matches!(*d, 1 | 7 | 30 | 180))
+                .unwrap_or(30),
+            whisper_server_url: take("whisper_server_url").unwrap_or_default(),
+            whisper_server_token: take("whisper_server_token").unwrap_or_default(),
+            whisper_server_model: take("whisper_server_model").unwrap_or_else(|| "whisper-1".to_string()),
+            voice_shortcut: take("voice_shortcut").unwrap_or_else(|| "option+space".to_string()),
+            selected_microphone: take("selected_microphone").unwrap_or_default(),
+            main_shortcut: take("main_shortcut").unwrap_or_else(|| "cmd+shift+v".to_string()),
+            show_in_dock: take("show_in_dock").map(|v| parse_bool(&v)).unwrap_or(false),
+            single_click_action: take("single_click_action")
+                .as_deref()
+                .and_then(ClickAction::from_db_str)
+                .unwrap_or(ClickAction::Copy),
+            double_click_action: take("double_click_action")
+                .as_deref()
+                .and_then(ClickAction::from_db_str)
+                .unwrap_or(ClickAction::Paste),
         })
     }
 
     pub fn update_app_settings(
         &self,
-        ollama_model: Option<&str>,
-        retention_days: Option<i64>,
-        whisper_server_url: Option<&str>,
-        whisper_server_token: Option<&str>,
-        whisper_server_model: Option<&str>,
-        voice_shortcut: Option<&str>,
-        selected_microphone: Option<&str>,
+        update: AppSettingsUpdate<'_>,
     ) -> Result<AppSettings, rusqlite::Error> {
-        if let Some(model) = ollama_model {
-            self.set_setting("ollama_model", model.trim())?;
-        }
-        if let Some(days) = retention_days {
-            self.set_setting("retention_days", &days.to_string())?;
-        }
-        if let Some(url) = whisper_server_url {
-            self.set_setting("whisper_server_url", url.trim())?;
-        }
-        if let Some(token) = whisper_server_token {
-            self.set_setting("whisper_server_token", token.trim())?;
-        }
-        if let Some(model) = whisper_server_model {
-            self.set_setting("whisper_server_model", model.trim())?;
-        }
-        if let Some(sc) = voice_shortcut {
-            self.set_setting("voice_shortcut", sc.trim())?;
-        }
-        if let Some(mic) = selected_microphone {
-            self.set_setting("selected_microphone", mic.trim())?;
+        {
+            let mut conn = self.conn.lock().unwrap();
+            let tx = conn.transaction()?;
+
+            let mut set = |key: &str, value: &str| -> Result<(), rusqlite::Error> {
+                tx.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )?;
+                Ok(())
+            };
+
+            if let Some(v) = update.ollama_model { set("ollama_model", v.trim())?; }
+            if let Some(v) = update.retention_days { set("retention_days", &v.to_string())?; }
+            if let Some(v) = update.whisper_server_url { set("whisper_server_url", v.trim())?; }
+            if let Some(v) = update.whisper_server_token { set("whisper_server_token", v.trim())?; }
+            if let Some(v) = update.whisper_server_model { set("whisper_server_model", v.trim())?; }
+            if let Some(v) = update.voice_shortcut { set("voice_shortcut", v.trim())?; }
+            if let Some(v) = update.selected_microphone { set("selected_microphone", v.trim())?; }
+            if let Some(v) = update.main_shortcut { set("main_shortcut", v.trim())?; }
+            if let Some(v) = update.show_in_dock { set("show_in_dock", if v { "1" } else { "0" })?; }
+            if let Some(v) = update.single_click_action { set("single_click_action", v.as_db_str())?; }
+            if let Some(v) = update.double_click_action { set("double_click_action", v.as_db_str())?; }
+
+            tx.commit()?;
         }
 
         self.get_app_settings()
@@ -831,7 +897,11 @@ mod tests {
     #[test]
     fn update_settings() {
         let db = test_db();
-        db.update_app_settings(Some("custom-model"), Some(7)).unwrap();
+        db.update_app_settings(AppSettingsUpdate {
+            ollama_model: Some("custom-model"),
+            retention_days: Some(7),
+            ..Default::default()
+        }).unwrap();
         let s = db.get_app_settings().unwrap();
         assert_eq!(s.ollama_model, "custom-model");
         assert_eq!(s.retention_days, 7);

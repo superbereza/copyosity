@@ -1,4 +1,4 @@
-use crate::db::{AppSettings, ClipboardEntry, Collection, Database, ExcludedApp, ModelCatalog};
+use crate::db::{AppSettings, AppSettingsUpdate, ClickAction, ClipboardEntry, Collection, Database, ExcludedApp, ModelCatalog};
 
 #[cfg(target_os = "macos")]
 fn simulate_paste() {
@@ -132,7 +132,7 @@ pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     )
     .title("Copyosity Settings")
     .inner_size(580.0, 680.0)
-    .resizable(true)
+    .resizable(false)
     .center();
 
     #[cfg(target_os = "macos")]
@@ -163,17 +163,25 @@ pub fn update_app_settings(
     whisper_server_model: Option<String>,
     voice_shortcut: Option<String>,
     selected_microphone: Option<String>,
+    main_shortcut: Option<String>,
+    show_in_dock: Option<bool>,
+    single_click_action: Option<ClickAction>,
+    double_click_action: Option<ClickAction>,
 ) -> Result<AppSettings, String> {
     let settings = db
-        .update_app_settings(
-            ollama_model.as_deref(),
+        .update_app_settings(AppSettingsUpdate {
+            ollama_model: ollama_model.as_deref(),
             retention_days,
-            whisper_server_url.as_deref(),
-            whisper_server_token.as_deref(),
-            whisper_server_model.as_deref(),
-            voice_shortcut.as_deref(),
-            selected_microphone.as_deref(),
-        )
+            whisper_server_url: whisper_server_url.as_deref(),
+            whisper_server_token: whisper_server_token.as_deref(),
+            whisper_server_model: whisper_server_model.as_deref(),
+            voice_shortcut: voice_shortcut.as_deref(),
+            selected_microphone: selected_microphone.as_deref(),
+            main_shortcut: main_shortcut.as_deref(),
+            show_in_dock,
+            single_click_action,
+            double_click_action,
+        })
         .map_err(|e| e.to_string())?;
 
     ollama::set_active_model(&settings.ollama_model);
@@ -397,6 +405,34 @@ pub fn test_ollama_tagging() -> Result<Option<Vec<String>>, String> {
 #[tauri::command]
 pub fn rebind_voice_shortcut(app: tauri::AppHandle) -> Result<String, String> {
     crate::register_voice_shortcut(&app)
+}
+
+#[tauri::command]
+pub fn rebind_main_shortcut(app: tauri::AppHandle) -> Result<String, String> {
+    crate::register_main_shortcut(&app)
+}
+
+#[tauri::command]
+pub fn restart_app_with_settings_open(
+    app: tauri::AppHandle,
+    db: State<'_, Arc<Database>>,
+) -> Result<(), String> {
+    db.set_setting("reopen_settings_on_launch", "1")
+        .map_err(|e| e.to_string())?;
+
+    // In dev builds `app.restart()` re-execs the binary, kills the
+    // `npm run tauri dev` parent and orphans Vite. Bypass Tauri's prevent_exit
+    // via std::process::exit so it actually quits.
+    #[cfg(debug_assertions)]
+    {
+        let _ = app;
+        std::process::exit(0);
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        app.restart();
+    }
 }
 
 #[tauri::command]

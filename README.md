@@ -4,11 +4,14 @@ A fast, privacy-first clipboard manager for macOS. Lives in your menu bar, opens
 
 Built with Tauri 2, Svelte 5, Rust, and SQLite.
 
+> This is a fork of [vakovalskii/copyosity](https://github.com/vakovalskii/copyosity) with a reworked
+> Settings UI and configurable behavior.
+
 ## Why Copyosity
 
 - **No focus stealing** — uses macOS NSPanel, your cursor stays exactly where it was
 - **Local AI tagging** — automatic smart tags via Ollama, everything runs on your machine
-- **Instant access** — Cmd+Shift+V opens history in ~100ms, Escape hides it
+- **Instant access** — global hotkey opens history in ~100ms, Escape hides it
 - **Privacy by design** — no cloud, no telemetry, clipboard stays in local SQLite
 
 ## Features
@@ -19,10 +22,10 @@ Built with Tauri 2, Svelte 5, Rust, and SQLite.
 - Search across all clipboard text
 - Configurable retention (1 day to 6 months)
 
-### Smart Actions
-- **Single click** — copy to clipboard
-- **Double click** — paste directly into the active cursor position
-- **Copy button** (⎘) on each card
+### Configurable Click Behavior
+- **Single click action** — choose `Copy to clipboard` or `Paste & close window`
+- **Double click action** — choose `Paste & close`, `Copy`, or disable (single click fires immediately)
+- **Copy button** (⎘) on each card — always copies regardless of click settings
 - **"Copied" animation** — visual confirmation before the window collapses
 - **Keyboard navigation** — arrow keys to browse, Enter to paste, Escape to dismiss
 
@@ -37,17 +40,41 @@ Built with Tauri 2, Svelte 5, Rust, and SQLite.
 - **Collections** — group clips into custom tabs
 - **Excluded apps** — block specific apps from being recorded (passwords, banking, etc.)
 
+### Settings (tabbed)
+- **General** — configurable main hotkey, Show in Dock toggle, history retention
+- **Behavior** — single/double click actions
+- **AI & Tags** — Ollama wizard and model selection
+- **Voice** — Whisper transcription endpoint + hold-to-record hotkey
+- **Privacy** — excluded apps
+- **Permissions** — Accessibility check, clear history
+
 ### System Integration
 - Menu bar tray icon (pink + turquoise)
-- Global shortcut: `Cmd + Shift + V`
-- Runs as Accessory app (no Dock icon)
-- macOS code-signed and notarized
+- Default global shortcut: `Cmd + Shift + V` (configurable in Settings → General)
+- Optionally runs as macOS Accessory (no Dock icon) — toggle in Settings → General
+- macOS code-signed and notarized (signing is configured for the upstream author —
+  unsigned local builds work for personal use, see Development below)
 
 ## Install
 
-1. Download `Copyosity_0.2.1_aarch64.dmg` from the [latest release](https://github.com/vakovalskii/copyosity/releases/latest).
-2. Open the DMG and drag **Copyosity** to Applications.
-3. Launch the app — it appears in the menu bar.
+This fork doesn't ship binaries yet. Build from source:
+
+```bash
+git clone <this-fork-url>
+cd copyosity
+npm install
+npm run tauri build
+# result: src-tauri/target/release/bundle/macos/Copyosity.app
+#         src-tauri/target/release/bundle/dmg/Copyosity_0.3.1_aarch64.dmg
+```
+
+Then drag `Copyosity.app` into `/Applications`. On first launch macOS may complain that
+the app is unsigned by an identified developer. Open it via **System Settings →
+Privacy & Security → Open anyway**, or run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Copyosity.app
+```
 
 ### Permissions
 
@@ -59,18 +86,19 @@ macOS will ask for:
 
 For automatic clipboard tagging:
 1. Install [Ollama](https://ollama.com/download)
-2. Open Copyosity Settings — follow the step-by-step status panel
+2. Open Copyosity Settings → AI & Tags — follow the step-by-step status panel
 3. The app will start the server and download the model for you
 
 ## Usage
 
 | Action | What it does |
 |--------|-------------|
-| `Cmd + Shift + V` | Open / close clipboard history |
-| Single click on card | Copy to clipboard |
-| Double click on card | Paste into active cursor |
+| Main hotkey (default `Cmd + Shift + V`) | Open / close clipboard history |
+| Voice hotkey (default `Option + Space`, hold) | Record → transcribe → paste at cursor |
+| Single click on card | Configurable in Settings → Behavior |
+| Double click on card | Configurable in Settings → Behavior |
 | `Escape` | Hide window |
-| Arrow keys + Enter | Navigate and paste |
+| Arrow keys + `Enter` | Navigate and paste |
 | Click ⎘ button | Copy without closing |
 | Click ★ button | Star / unstar |
 | Click gear icon | Open Settings |
@@ -79,8 +107,10 @@ For automatic clipboard tagging:
 
 - All data stored locally in `~/Library/Application Support/com.vkovalskii.copyosity/`
 - AI tagging runs on `127.0.0.1` via Ollama — nothing leaves your machine
+- Voice transcription uses the Whisper-compatible URL you configure in Settings → Voice
+  (defaults to empty — feature off until you point it somewhere)
 - Exclude sensitive apps in Settings → Privacy
-- Clear history anytime from Settings
+- Clear history anytime from Settings → Permissions
 
 ## Development
 

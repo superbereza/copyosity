@@ -9,6 +9,8 @@
     getAppSettings,
     getExcludedApps,
     getModelCatalog,
+    rebindMainShortcut,
+    restartAppWithSettingsOpen,
     removeExcludedApp,
     updateAppSettings,
     rebindVoiceShortcut,
@@ -23,6 +25,19 @@
   } from "$lib/api";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
+  type TabId = "general" | "behavior" | "ai" | "voice" | "privacy" | "permissions";
+
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "general", label: "General" },
+    { id: "behavior", label: "Behavior" },
+    { id: "ai", label: "AI & Tags" },
+    { id: "voice", label: "Voice" },
+    { id: "privacy", label: "Privacy" },
+    { id: "permissions", label: "Permissions" },
+  ];
+
+  let activeTab = $state<TabId>("general");
+
   let settings = $state<AppSettings>({
     ollama_model: "qwen3:4b-instruct-2507-q4_K_M",
     retention_days: 30,
@@ -31,6 +46,10 @@
     whisper_server_model: "whisper-1",
     voice_shortcut: "option+space",
     selected_microphone: "",
+    main_shortcut: "cmd+shift+v",
+    show_in_dock: false,
+    single_click_action: "copy",
+    double_click_action: "paste",
   });
   let microphones: AudioInputDevice[] = $state([]);
   let modelCatalog = $state<ModelCatalog>({
@@ -44,6 +63,8 @@
   let savingSettings = $state(false);
   let settingsNotice = $state("");
   let savedModel = $state("");
+  let savedShowInDock = $state<boolean | null>(null);
+  let restartRequired = $state(false);
 
   let accessibilityGranted = $state<boolean | null>(null);
 
@@ -64,6 +85,7 @@
     settings = await getAppSettings();
     selectedModelPreset = settings.ollama_model;
     savedModel = settings.ollama_model;
+    savedShowInDock = settings.show_in_dock;
   }
 
   async function loadModelCatalog() {
@@ -152,13 +174,21 @@
         whisper_server_model: settings.whisper_server_model,
         voice_shortcut: settings.voice_shortcut,
         selected_microphone: settings.selected_microphone,
+        main_shortcut: settings.main_shortcut,
+        show_in_dock: settings.show_in_dock,
+        single_click_action: settings.single_click_action,
+        double_click_action: settings.double_click_action,
       });
+      const dockChanged = savedShowInDock !== null && savedShowInDock !== settings.show_in_dock;
       savedModel = settings.ollama_model;
-      settingsNotice = "Saved";
+      settingsNotice = dockChanged ? "Saved — restart required for Dock change" : "Saved";
+      restartRequired = dockChanged;
+      savedShowInDock = settings.show_in_dock;
       taggingResult = undefined;
       // Run post-save tasks in parallel
       await Promise.all([
         rebindVoiceShortcut(),
+        rebindMainShortcut(),
         loadModelCatalog(),
         refreshOllamaStatus(),
       ]);
@@ -203,14 +233,127 @@
   });
 
   let modelDirty = $derived(settings.ollama_model !== savedModel);
+
+  // Tag non-interactive descendants with `data-tauri-drag-region` and keep
+  // tagging as tabs swap subtrees.
+  function dragRegion(node: HTMLElement) {
+    const INTERACTIVE = "button, input, select, textarea, a, label, [contenteditable]";
+    function apply(el: Element) {
+      if (!(el instanceof HTMLElement)) return;
+      if (!el.matches(INTERACTIVE) && !el.closest(INTERACTIVE)) {
+        el.setAttribute("data-tauri-drag-region", "");
+      }
+      for (const child of Array.from(el.children)) apply(child);
+    }
+    apply(node);
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const added of Array.from(m.addedNodes)) {
+          if (added instanceof HTMLElement) apply(added);
+        }
+      }
+    });
+    observer.observe(node, { childList: true, subtree: true });
+
+    return { destroy: () => observer.disconnect() };
+  }
 </script>
 
-<div class="settings-page">
-  <div class="settings-head">
-    <div class="settings-title">Settings</div>
-    <div class="settings-subtitle">Local AI and history behavior</div>
-  </div>
+<div class="settings-page" use:dragRegion>
 
+  {#if restartRequired}
+    <div class="restart-banner">
+      <div class="restart-banner-text">Restart Copyosity to apply Dock change.</div>
+      <button class="restart-banner-btn" type="button" onclick={() => restartAppWithSettingsOpen()}>
+        Restart
+      </button>
+    </div>
+  {/if}
+
+  <nav class="settings-tabs" aria-label="Settings sections">
+    {#each tabs as tab}
+      <button
+        type="button"
+        class="settings-tab"
+        class:active={activeTab === tab.id}
+        onclick={() => (activeTab = tab.id)}
+      >
+        {tab.label}
+      </button>
+    {/each}
+  </nav>
+
+  {#if activeTab === "general"}
+    <section class="settings-section">
+      <div class="settings-section-title">Main Shortcut</div>
+      <label class="settings-field">
+        <span class="settings-label">Open / close clipboard history</span>
+        <input
+          class="settings-input"
+          type="text"
+          bind:value={settings.main_shortcut}
+          placeholder="cmd+shift+v"
+        />
+        <div class="settings-hint">
+          Use: <code>cmd</code>, <code>option</code>, <code>ctrl</code>, <code>shift</code> + key.
+          Examples: <code>cmd+shift+v</code>, <code>ctrl+space</code>, <code>option+v</code>
+        </div>
+      </label>
+    </section>
+
+    <section class="settings-section">
+      <div class="settings-section-title">Dock</div>
+      <label class="settings-toggle">
+        <input type="checkbox" bind:checked={settings.show_in_dock} />
+        <span class="settings-toggle-label">Show in Dock</span>
+      </label>
+      <div class="settings-hint">
+        When off, Copyosity runs as a macOS Accessory app — visible only in the menu bar.
+        Changing this requires an app restart; you'll be prompted after saving.
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <div class="settings-section-title">Storage</div>
+      <label class="settings-field">
+        <span class="settings-label">History retention</span>
+        <select class="settings-select" bind:value={settings.retention_days}>
+          {#each retentionOptions as option}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
+    </section>
+  {/if}
+
+  {#if activeTab === "behavior"}
+    <section class="settings-section">
+      <div class="settings-section-title">Click Behavior</div>
+      <label class="settings-field">
+        <span class="settings-label">Single click on card</span>
+        <select class="settings-select" bind:value={settings.single_click_action}>
+          <option value="copy">Copy to clipboard</option>
+          <option value="paste">Paste &amp; close window</option>
+        </select>
+      </label>
+      <label class="settings-field" style="margin-top: 8px;">
+        <span class="settings-label">Double click on card</span>
+        <select class="settings-select" bind:value={settings.double_click_action}>
+          <option value="paste">Paste &amp; close window</option>
+          <option value="copy">Copy to clipboard</option>
+          <option value="none">Disabled (single click fires immediately)</option>
+        </select>
+      </label>
+      <div class="settings-hint">
+        When double click is disabled, single click triggers without a 250ms delay.
+        The <code>Enter</code> key always pastes and closes (used by keyboard navigation).
+        The dedicated <code>⎘</code> button on each card always copies regardless of these settings.
+      </div>
+    </section>
+  {/if}
+
+  {#if activeTab === "permissions"}
   <section class="settings-section">
     <div class="settings-section-title">Permissions</div>
     <div class="status-step">
@@ -238,6 +381,15 @@
     </div>
   </section>
 
+  <section class="settings-section">
+    <div class="settings-section-title">Danger zone</div>
+    <button class="settings-item danger" type="button" onclick={handleClearHistory}>
+      Clear unpinned history
+    </button>
+  </section>
+  {/if}
+
+  {#if activeTab === "ai"}
   <section class="settings-section">
     <div class="settings-section-title">Local AI Status</div>
 
@@ -417,19 +569,9 @@
       </div>
     </label>
   </section>
+  {/if}
 
-  <section class="settings-section">
-    <div class="settings-section-title">Storage</div>
-    <label class="settings-field">
-      <span class="settings-label">History retention</span>
-      <select class="settings-select" bind:value={settings.retention_days}>
-        {#each retentionOptions as option}
-          <option value={option.value}>{option.label}</option>
-        {/each}
-      </select>
-    </label>
-  </section>
-
+  {#if activeTab === "privacy"}
   <section class="settings-section">
     <div class="settings-section-title">Privacy</div>
     <div class="settings-field">
@@ -468,7 +610,9 @@
       {/if}
     </div>
   </section>
+  {/if}
 
+  {#if activeTab === "voice"}
   <section class="settings-section">
     <div class="settings-section-title">Voice Transcription</div>
     <div class="settings-hint" style="margin-bottom: 10px;">
@@ -525,6 +669,7 @@
       />
     </label>
   </section>
+  {/if}
 
   <div class="settings-actions">
     <button class="settings-save-btn" type="button" disabled={savingSettings} onclick={saveSettings}>
@@ -533,12 +678,6 @@
     {#if settingsNotice}
       <div class="settings-note">{settingsNotice}</div>
     {/if}
-  </div>
-
-  <div class="settings-divider"></div>
-
-  <div class="settings-secondary">
-    <button class="settings-item danger" type="button" onclick={handleClearHistory}>Clear unpinned history</button>
   </div>
 </div>
 
@@ -558,27 +697,107 @@
   }
 
   .settings-page {
-    padding: 20px;
+    padding: 36px 24px 24px;
     max-width: 540px;
     margin: 0 auto;
   }
 
-  .settings-head {
-    margin-bottom: 16px;
+  .restart-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: linear-gradient(180deg, rgba(255, 184, 79, 0.16), rgba(255, 144, 50, 0.10));
+    border: 1px solid rgba(255, 184, 79, 0.32);
+    border-radius: 11px;
   }
 
-  .settings-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #f2f5fb;
-    letter-spacing: -0.02em;
+  .restart-banner-text {
+    flex: 1;
+    font-size: 12px;
+    color: #f6d8a8;
+    line-height: 1.4;
   }
 
-  .settings-subtitle {
-    margin-top: 4px;
+  .restart-banner-btn {
+    padding: 7px 14px;
+    background: rgba(255, 184, 79, 0.22);
+    border: 1px solid rgba(255, 184, 79, 0.38);
+    border-radius: 9px;
+    color: #fff1d8;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+
+  .restart-banner-btn:hover {
+    background: rgba(255, 184, 79, 0.32);
+    transform: translateY(-1px);
+  }
+
+  .settings-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 14px;
+    padding: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+  }
+
+  .settings-tab {
+    flex: 1 1 auto;
+    min-width: 70px;
+    padding: 7px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: #b8bdcc;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .settings-tab:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: #edf1f8;
+  }
+
+  .settings-tab.active {
+    background: rgba(94, 140, 255, 0.18);
+    border-color: rgba(120, 160, 255, 0.28);
+    color: #eef3ff;
+  }
+
+  .settings-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .settings-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: #6791ff;
+    cursor: pointer;
+  }
+
+  .settings-toggle-label {
     font-size: 13px;
-    color: #9097aa;
+    font-weight: 600;
+    color: #edf1f8;
   }
+
 
   .settings-section {
     padding: 14px;
@@ -763,18 +982,6 @@
     padding: 0 2px;
     font-size: 11px;
     color: #91d6a6;
-  }
-
-  .settings-divider {
-    height: 1px;
-    margin: 14px 0 12px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
-  }
-
-  .settings-secondary {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
   }
 
   .excluded-apps {
