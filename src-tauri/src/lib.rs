@@ -43,6 +43,65 @@ fn voice_shortcut_mutex() -> &'static std::sync::Mutex<Option<Shortcut>> {
     CURRENT_VOICE_SHORTCUT.get_or_init(|| std::sync::Mutex::new(None))
 }
 
+static CURRENT_MAIN_SHORTCUT: std::sync::OnceLock<std::sync::Mutex<Option<Shortcut>>> =
+    std::sync::OnceLock::new();
+
+fn main_shortcut_mutex() -> &'static std::sync::Mutex<Option<Shortcut>> {
+    CURRENT_MAIN_SHORTCUT.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn default_main_shortcut() -> Shortcut {
+    #[cfg(target_os = "macos")]
+    {
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyV)
+    }
+}
+
+fn register_shortcut_in_slot<F>(
+    app: &tauri::AppHandle,
+    slot: &'static std::sync::Mutex<Option<Shortcut>>,
+    new_shortcut: Shortcut,
+    handler: F,
+) -> Result<(), String>
+where
+    F: Fn(&tauri::AppHandle, ShortcutState) + Send + Sync + 'static,
+{
+    {
+        let mut current = slot.lock().unwrap();
+        if let Some(old) = current.take() {
+            let _ = app.global_shortcut().unregister(old);
+        }
+    }
+
+    app.global_shortcut()
+        .on_shortcut(new_shortcut, move |app, _shortcut, event| {
+            handler(app, event.state);
+        })
+        .map_err(|e| format!("Failed to register shortcut: {}", e))?;
+
+    *slot.lock().unwrap() = Some(new_shortcut);
+    Ok(())
+}
+
+pub fn register_main_shortcut(app: &tauri::AppHandle) -> Result<String, String> {
+    let db = app.state::<std::sync::Arc<db::Database>>();
+    let settings = db.get_app_settings().map_err(|e| e.to_string())?;
+    let new_shortcut = parse_shortcut(&settings.main_shortcut)
+        .unwrap_or_else(default_main_shortcut);
+
+    register_shortcut_in_slot(app, main_shortcut_mutex(), new_shortcut, |app, state| {
+        if state == ShortcutState::Pressed {
+            toggle_window(app);
+        }
+    })?;
+
+    Ok(settings.main_shortcut)
+}
+
 /// Parse a string like "option+space", "cmd+space", "ctrl+alt+space" into a Shortcut.
 fn parse_shortcut(s: &str) -> Option<Shortcut> {
     let lower = s.to_lowercase();
@@ -87,35 +146,15 @@ fn parse_shortcut(s: &str) -> Option<Shortcut> {
     Some(Shortcut::new(mods_opt, key))
 }
 
-/// Register (or re-register) the voice shortcut from current DB settings.
-/// Returns the shortcut string on success.
 pub fn register_voice_shortcut(app: &tauri::AppHandle) -> Result<String, String> {
     let db = app.state::<std::sync::Arc<db::Database>>();
     let settings = db.get_app_settings().map_err(|e| e.to_string())?;
-
-    eprintln!("[voice] registering shortcut: \"{}\"", settings.voice_shortcut);
-
     let new_shortcut = parse_shortcut(&settings.voice_shortcut)
         .ok_or_else(|| format!("Invalid shortcut: {}", settings.voice_shortcut))?;
 
-    // Unregister old shortcut if any
-    {
-        let mut current = voice_shortcut_mutex().lock().unwrap();
-        if let Some(old) = current.take() {
-            let _ = app.global_shortcut().unregister(old);
-        }
-    }
-
-    // Register new one
-    let voice_handle = app.clone();
-    app.global_shortcut()
-        .on_shortcut(new_shortcut, move |_app, _shortcut, event| {
-            handle_voice_event(&voice_handle, event.state);
-        })
-        .map_err(|e| format!("Failed to register shortcut: {}", e))?;
-
-    // Store it
-    *voice_shortcut_mutex().lock().unwrap() = Some(new_shortcut);
+    register_shortcut_in_slot(app, voice_shortcut_mutex(), new_shortcut, |app, state| {
+        handle_voice_event(app, state);
+    })?;
 
     Ok(settings.voice_shortcut)
 }
@@ -204,39 +243,84 @@ pub fn run() {
                 .build(app)?;
             app.manage(tray);
 
-            let shortcut = {
-                #[cfg(target_os = "macos")]
-                { Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV) }
-                #[cfg(not(target_os = "macos"))]
-                { Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyV) }
-            };
-
-            let handle = app.handle().clone();
-            app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    toggle_window(&handle);
-                }
-            })?;
-
             // Pre-create voice overlay panel so it's ready without stealing focus later
             ensure_voice_overlay(app.handle());
+
+            // Register main window toggle shortcut from settings
+            if let Err(e) = register_main_shortcut(app.handle()) {
+                eprintln!("Main shortcut registration failed: {}", e);
+            }
 
             // Register voice transcription shortcut from settings
             if let Err(e) = register_voice_shortcut(app.handle()) {
                 eprintln!("Voice shortcut registration failed: {}", e);
             }
-            eprintln!(
-                "copyosity: global shortcut registered = {}",
-                app.global_shortcut().is_registered(shortcut)
-            );
 
             let settings = db.get_app_settings().expect("Failed to load app settings");
+
+            // Carbon TransformProcessType is the reliable way to surface or hide
+            // the Dock icon at launch; Tauri's setActivationPolicy alone doesn't
+            // always redraw on every macOS version.
+            #[cfg(target_os = "macos")]
+            {
+                let policy = if settings.show_in_dock {
+                    tauri::ActivationPolicy::Regular
+                } else {
+                    tauri::ActivationPolicy::Accessory
+                };
+                let _ = app.set_activation_policy(policy);
+
+                unsafe {
+                    #[repr(C)]
+                    #[derive(Clone, Copy)]
+                    struct ProcessSerialNumber {
+                        high: u32,
+                        low: u32,
+                    }
+
+                    const K_CURRENT_PROCESS: u32 = 2;
+                    const K_PROCESS_TRANSFORM_TO_FOREGROUND_APPLICATION: u32 = 1;
+                    const K_PROCESS_TRANSFORM_TO_UI_ELEMENT_APPLICATION: u32 = 4;
+
+                    #[link(name = "ApplicationServices", kind = "framework")]
+                    extern "C" {
+                        fn TransformProcessType(psn: *const ProcessSerialNumber, transform: u32) -> i32;
+                    }
+
+                    let psn = ProcessSerialNumber { high: 0, low: K_CURRENT_PROCESS };
+                    let transform = if settings.show_in_dock {
+                        K_PROCESS_TRANSFORM_TO_FOREGROUND_APPLICATION
+                    } else {
+                        K_PROCESS_TRANSFORM_TO_UI_ELEMENT_APPLICATION
+                    };
+                    let _ = TransformProcessType(&psn, transform);
+                }
+                eprintln!(
+                    "[main] dock visibility on launch: show_in_dock={}",
+                    settings.show_in_dock
+                );
+            }
+
             ollama::set_active_model(&settings.ollama_model);
             let _ = db.cleanup_old_entries(settings.retention_days);
 
             ollama::ensure_runtime();
             ollama::backfill_existing_tags(app.handle().clone(), db.clone());
             clipboard_monitor::start_clipboard_monitor(app.handle().clone());
+
+            // If the previous run requested it, reopen Settings (e.g. after a
+            // restart triggered by a Dock-visibility change). 400ms gives the
+            // tray and main window time to finish initialising.
+            if let Ok(Some(flag)) = db.get_setting("reopen_settings_on_launch") {
+                if flag == "1" {
+                    let _ = db.set_setting("reopen_settings_on_launch", "0");
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                        let _ = commands::open_settings_window(handle);
+                    });
+                }
+            }
 
             Ok(())
         })
@@ -271,6 +355,8 @@ pub fn run() {
             commands::unload_ollama_model,
             commands::test_ollama_tagging,
             commands::rebind_voice_shortcut,
+            commands::rebind_main_shortcut,
+            commands::restart_app_with_settings_open,
             commands::list_microphones,
         ])
         .build(tauri::generate_context!())

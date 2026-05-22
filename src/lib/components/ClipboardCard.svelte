@@ -2,9 +2,13 @@
   import type { ClipboardEntry } from "$lib/types";
   import { copyEntry, activateEntry, deleteEntry, pinEntry, retagEntry } from "$lib/api";
 
+  type ClickAction = "copy" | "paste" | "none";
+
   let {
     entry,
     selected = false,
+    singleClickAction = "copy",
+    doubleClickAction = "paste",
     onpasted,
     ondeleted,
     onpinned,
@@ -12,6 +16,8 @@
   }: {
     entry: ClipboardEntry;
     selected?: boolean;
+    singleClickAction?: ClickAction;
+    doubleClickAction?: ClickAction;
     onpasted?: () => void;
     ondeleted?: () => void;
     onpinned?: () => void;
@@ -66,38 +72,39 @@
 
   let copied = $state(false);
   let clickTimer: ReturnType<typeof setTimeout> | undefined;
+  let clickable = $derived(entry.content_type === "text" || entry.content_type === "image");
+
+  async function runAction(action: ClickAction) {
+    if (copied || !clickable || action === "none") return;
+    if (action === "paste") {
+      await activateEntry(entry.id);
+      onpasted?.();
+    } else if (action === "copy") {
+      await copyEntry(entry.id);
+      copied = true;
+      setTimeout(() => { copied = false; }, 800);
+    }
+  }
 
   function handleClick() {
-    // Disambiguate single vs double click
+    if (doubleClickAction === "none") {
+      runAction(singleClickAction);
+      return;
+    }
     if (clickTimer) {
       clearTimeout(clickTimer);
       clickTimer = undefined;
-      handleDoubleClick();
+      runAction(doubleClickAction);
       return;
     }
     clickTimer = setTimeout(() => {
       clickTimer = undefined;
-      handleSingleClick();
+      runAction(singleClickAction);
     }, 250);
   }
 
-  async function handleSingleClick() {
-    if (copied) return;
-    if (entry.content_type === "text" || entry.content_type === "image") {
-      await copyEntry(entry.id);
-      copied = true;
-      setTimeout(() => {
-        copied = false;
-      }, 800);
-    }
-  }
-
-  async function handleDoubleClick() {
-    if (copied) return;
-    if (entry.content_type === "text" || entry.content_type === "image") {
-      await activateEntry(entry.id);
-      onpasted?.();
-    }
+  async function handleActivate() {
+    await runAction("paste");
   }
 
   async function handleCopy(e: MouseEvent) {
@@ -139,7 +146,7 @@
   class:pinned={entry.is_pinned}
   class:copied
   onclick={handleClick}
-  onkeydown={(e) => e.key === 'Enter' && handleDoubleClick()}
+  onkeydown={(e) => e.key === 'Enter' && handleActivate()}
   role="button"
   tabindex="0"
   title={entry.text_content ?? ""}

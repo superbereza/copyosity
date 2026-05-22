@@ -61,6 +61,10 @@ export async function updateAppSettings(opts: {
   whisper_server_model?: string | null;
   voice_shortcut?: string | null;
   selected_microphone?: string | null;
+  main_shortcut?: string | null;
+  show_in_dock?: boolean | null;
+  single_click_action?: string | null;
+  double_click_action?: string | null;
 }): Promise<AppSettings> {
   return invoke("update_app_settings", {
     ollamaModel: opts.ollama_model ?? null,
@@ -70,7 +74,19 @@ export async function updateAppSettings(opts: {
     whisperServerModel: opts.whisper_server_model ?? null,
     voiceShortcut: opts.voice_shortcut ?? null,
     selectedMicrophone: opts.selected_microphone ?? null,
+    mainShortcut: opts.main_shortcut ?? null,
+    showInDock: opts.show_in_dock ?? null,
+    singleClickAction: opts.single_click_action ?? null,
+    doubleClickAction: opts.double_click_action ?? null,
   });
+}
+
+export async function rebindMainShortcut(): Promise<string> {
+  return invoke("rebind_main_shortcut");
+}
+
+export async function restartAppWithSettingsOpen(): Promise<void> {
+  return invoke("restart_app_with_settings_open");
 }
 
 export async function listMicrophones(): Promise<AudioInputDevice[]> {
