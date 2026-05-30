@@ -249,14 +249,20 @@
 
   let modelDirty = $derived(settings.ollama_model !== savedModel);
 
-  // Tag non-interactive descendants with `data-tauri-drag-region` and keep
-  // tagging as tabs swap subtrees.
+  // Tauri 2 picks the closest [data-tauri-drag-region] ancestor on mousedown,
+  // so tagging a container that holds a button steals the click and starts a
+  // window drag. Solution: only tag elements that contain NO interactive
+  // descendants — so leaf text/icon nodes drag, containers don't.
   function dragRegion(node: HTMLElement) {
     const INTERACTIVE = "button, input, select, textarea, a, label, [contenteditable]";
     function apply(el: Element) {
       if (!(el instanceof HTMLElement)) return;
-      if (!el.matches(INTERACTIVE) && !el.closest(INTERACTIVE)) {
+      const isInteractive = el.matches(INTERACTIVE);
+      const containsInteractive = !!el.querySelector(INTERACTIVE);
+      if (!isInteractive && !containsInteractive && !el.closest(INTERACTIVE)) {
         el.setAttribute("data-tauri-drag-region", "");
+      } else {
+        el.removeAttribute("data-tauri-drag-region");
       }
       for (const child of Array.from(el.children)) apply(child);
     }
@@ -721,7 +727,7 @@
     font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.15s ease;
+    transition: background 0.15s ease, transform 0.08s ease;
   }
 
   .restart-banner-btn:hover { background: rgba(217, 165, 90, 0.28); }
@@ -750,10 +756,11 @@
     font-size: var(--text-sm);
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.08s ease;
   }
 
   .settings-tab:hover { color: var(--fg-primary); background: var(--surface-2); }
+  .settings-tab:active { transform: scale(0.98); background: var(--surface-3); }
   .settings-tab.active {
     background: var(--accent-bg-strong);
     color: var(--fg-primary);
@@ -900,7 +907,7 @@
     font-size: var(--text-sm);
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
   }
 
   .settings-small-btn {
@@ -912,6 +919,7 @@
   }
 
   .settings-small-btn:hover { background: var(--accent-bg-strong); }
+  .settings-small-btn:active { transform: scale(0.98); background: rgba(107, 141, 214, 0.30); }
 
   .settings-ghost-btn {
     padding: 0 var(--space-3);
@@ -922,6 +930,7 @@
   }
 
   .settings-ghost-btn:hover { background: var(--surface-3); color: var(--fg-primary); }
+  .settings-ghost-btn:active { transform: scale(0.98); background: rgba(255, 255, 255, 0.12); }
 
   /* Save button — primary */
   .settings-actions {
@@ -943,10 +952,11 @@
     font-size: var(--text-sm);
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease, opacity 0.15s ease;
+    transition: background 0.15s ease, opacity 0.15s ease, transform 0.08s ease;
   }
 
   .settings-save-btn:hover:not(:disabled) { background: var(--accent-hover); }
+  .settings-save-btn:active:not(:disabled) { transform: scale(0.98); background: #5a7cc3; }
   .settings-save-btn:disabled { opacity: 0.5; cursor: default; }
 
   .settings-note {
@@ -1007,7 +1017,7 @@
     cursor: pointer;
     font: inherit;
     font-size: var(--text-sm);
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.08s ease;
   }
 
   .settings-item.danger { color: var(--danger); }
@@ -1057,9 +1067,10 @@
     font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.15s ease;
+    transition: background 0.15s ease, transform 0.08s ease;
   }
   .status-action:hover:not(:disabled) { background: var(--accent-bg-strong); }
+  .status-action:active:not(:disabled) { transform: scale(0.97); background: rgba(107, 141, 214, 0.30); }
   .status-action:disabled { opacity: 0.5; cursor: default; }
 
   .refresh-btn {
