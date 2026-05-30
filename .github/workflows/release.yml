@@ -16,7 +16,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # tag annotations need full history
+          fetch-depth: 0       # full history
+          fetch-tags: true     # annotated tag objects (not just refs)
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -68,12 +69,8 @@ jobs:
           MSG=$(git for-each-ref "refs/tags/${{ steps.version.outputs.tag }}" --format='%(contents)' | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d')
           MSG="$(printf '%s' "$MSG" | sed -e 's/[[:space:]]*$//')"
           if [ -n "$MSG" ]; then
+            printf '%s' "$MSG" > release-notes.md
             echo "annotated=true" >> $GITHUB_OUTPUT
-            {
-              echo 'body<<NOTESEOF'
-              printf '%s\n' "$MSG"
-              echo 'NOTESEOF'
-            } >> $GITHUB_OUTPUT
           else
             echo "annotated=false" >> $GITHUB_OUTPUT
           fi
@@ -86,7 +83,7 @@ jobs:
           gh release create "${{ steps.version.outputs.tag }}" \
             "Copyosity_${{ steps.version.outputs.version }}_aarch64.dmg" \
             --title "${{ steps.version.outputs.tag }}" \
-            --notes "${{ steps.notes.outputs.body }}"
+            --notes-file release-notes.md
 
       - name: Create release (auto-generated notes)
         if: steps.notes.outputs.annotated == 'false'
