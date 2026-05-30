@@ -50,6 +50,16 @@ jobs:
       - name: Build Tauri app (unsigned, .app only)
         run: npm run tauri build -- --bundles app
 
+      - name: Ad-hoc codesign (regenerates CodeResources)
+        run: |
+          # The Rust linker's automatic ad-hoc signature claims resources
+          # exist but doesn't generate _CodeSignature/CodeResources, which
+          # macOS Gatekeeper on other machines rejects with "code has no
+          # resources but signature indicates they must be present".
+          # Re-sign via codesign tool to generate the manifest properly.
+          codesign --force --deep --sign - src-tauri/target/release/bundle/macos/Copyosity.app
+          spctl -a -vvv src-tauri/target/release/bundle/macos/Copyosity.app 2>&1 || true
+
       - name: Package DMG via hdiutil
         run: |
           set -euo pipefail
