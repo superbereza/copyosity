@@ -195,8 +195,9 @@ pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
         "settings",
         tauri::WebviewUrl::App("/settings".into()),
     )
-    .title("")
+    .title("Copyosity Settings")
     .inner_size(560.0, 720.0)
+    .theme(Some(tauri::Theme::Dark))
     .resizable(false)
     .center();
 
@@ -392,11 +393,28 @@ pub fn paste_entry(app: tauri::AppHandle, text: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Silent check — returns trusted state without prompting.
 #[tauri::command]
 pub fn check_accessibility() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
-        // AXIsProcessTrustedWithOptions with prompt: true shows the system dialog
+        unsafe {
+            #[link(name = "ApplicationServices", kind = "framework")]
+            extern "C" {
+                fn AXIsProcessTrusted() -> bool;
+            }
+            return Ok(AXIsProcessTrusted());
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    Ok(true)
+}
+
+/// Prompts the system dialog and returns the current trusted state.
+#[tauri::command]
+pub fn request_accessibility() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
         unsafe {
             #[link(name = "ApplicationServices", kind = "framework")]
             extern "C" {
@@ -423,7 +441,6 @@ pub fn check_accessibility() -> Result<bool, String> {
             return Ok(trusted);
         }
     }
-
     #[cfg(not(target_os = "macos"))]
     Ok(true)
 }

@@ -322,6 +322,7 @@ pub fn run() {
             commands::activate_entry,
             commands::paste_entry,
             commands::check_accessibility,
+            commands::request_accessibility,
             commands::check_ollama_status,
             commands::start_ollama_server,
             commands::pull_ollama_model,

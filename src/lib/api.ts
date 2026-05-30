@@ -146,6 +146,10 @@ export async function checkAccessibility(): Promise<boolean> {
   return invoke("check_accessibility");
 }
 
+export async function requestAccessibility(): Promise<boolean> {
+  return invoke("request_accessibility");
+}
+
 export async function checkOllamaStatus(): Promise<OllamaStatus> {
   return invoke("check_ollama_status");
 }
