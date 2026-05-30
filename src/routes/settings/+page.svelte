@@ -177,12 +177,42 @@
       handleCheckForUpdate();
     });
 
+    // Auto-poll accessibility while not granted — user may grant in System
+    // Settings while this window is open and shouldn't need to restart or
+    // click Recheck. Stops polling once granted; next Settings open re-checks.
+    let accessibilityTimer: ReturnType<typeof setInterval> | undefined;
+    accessibilityTimer = setInterval(async () => {
+      const next = await checkAccessibility();
+      if (next !== accessibilityGranted) {
+        accessibilityGranted = next;
+      }
+      if (next === true) {
+        clearInterval(accessibilityTimer);
+        accessibilityTimer = undefined;
+      }
+    }, 2000);
+
     return () => {
       unlistenPull.then((fn) => fn());
       unlistenPullDone.then((fn) => fn());
       unlistenUpdateCheck.then((fn) => fn());
+      clearInterval(accessibilityTimer);
     };
   });
+
+  // Click-to-copy for shell commands shown inside .settings-hint / .status-hint
+  let copiedCmd = $state<string | null>(null);
+  async function copyCmd(cmd: string) {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      copiedCmd = cmd;
+      setTimeout(() => {
+        if (copiedCmd === cmd) copiedCmd = null;
+      }, 1200);
+    } catch (e) {
+      console.error("copy failed", e);
+    }
+  }
 
   async function saveSettings() {
     savingSettings = true;
@@ -485,7 +515,7 @@
         {#if ollamaStatus.cli_installed && !ollamaStatus.server_running}
           <div class="status-hint">
             Ollama server is not running. Click "Start" to launch it, or run
-            <code>ollama serve</code> in your terminal.
+            <button class="cmd-code" type="button" onclick={() => copyCmd('ollama serve')} title="Click to copy">{copiedCmd === 'ollama serve' ? 'copied!' : 'ollama serve'}</button> in your terminal.
           </div>
         {/if}
       </div>
@@ -513,14 +543,20 @@
             <span class="spinner"></span> {pullProgress}
           </div>
         {:else if ollamaStatus.server_running && !ollamaStatus.model_installed}
+          {@const pullCmd = `ollama pull ${ollamaStatus.model_name}`}
           <div class="status-hint">
-            Model <code>{ollamaStatus.model_name}</code> needs to be downloaded.
-            Click "Download" or run <code>ollama pull {ollamaStatus.model_name}</code> in terminal.
+            Model
+            <button class="cmd-code" type="button" onclick={() => copyCmd(ollamaStatus!.model_name)} title="Click to copy">{copiedCmd === ollamaStatus.model_name ? 'copied!' : ollamaStatus.model_name}</button>
+            needs to be downloaded.
+            Click "Download" or run
+            <button class="cmd-code" type="button" onclick={() => copyCmd(pullCmd)} title="Click to copy">{copiedCmd === pullCmd ? 'copied!' : pullCmd}</button>
+            in terminal.
             This may take a few minutes depending on your connection.
           </div>
         {:else if ollamaStatus.model_installed}
           <div class="status-hint ok">
-            Using <code>{ollamaStatus.model_name}</code>
+            Using
+            <button class="cmd-code" type="button" onclick={() => copyCmd(ollamaStatus!.model_name)} title="Click to copy">{copiedCmd === ollamaStatus.model_name ? 'copied!' : ollamaStatus.model_name}</button>
           </div>
         {/if}
       </div>
@@ -858,8 +894,7 @@
     color: var(--fg-muted);
   }
 
-  .settings-hint code,
-  .status-hint code {
+  .settings-hint code {
     display: inline-block;
     padding: 0 5px;
     background: var(--surface-2);
@@ -871,6 +906,23 @@
     color: var(--fg-primary);
     vertical-align: baseline;
   }
+
+  .cmd-code {
+    display: inline-block;
+    padding: 1px 7px;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+    border-radius: 4px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 0.92em;
+    line-height: 1.5;
+    color: var(--fg-primary);
+    cursor: pointer;
+    vertical-align: baseline;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.08s ease;
+  }
+  .cmd-code:hover { background: var(--accent-bg-strong); }
+  .cmd-code:active { transform: scale(0.96); }
 
   .settings-hint.fits { color: var(--success); }
   .settings-hint.tight { color: var(--warning); }
@@ -1091,15 +1143,6 @@
 
   .status-hint.ok { color: var(--success); }
   .status-hint.fail { color: var(--danger); }
-
-  .status-hint code {
-    padding: 1px 5px;
-    background: var(--surface-2);
-    border-radius: 3px;
-    font-family: "SF Mono", Menlo, monospace;
-    font-size: 10.5px;
-    color: var(--fg-primary);
-  }
 
   .link-btn {
     background: none;
