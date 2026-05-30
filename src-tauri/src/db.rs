@@ -34,11 +34,6 @@ impl ClickAction {
 pub struct AppSettingsUpdate<'a> {
     pub ollama_model: Option<&'a str>,
     pub retention_days: Option<i64>,
-    pub whisper_server_url: Option<&'a str>,
-    pub whisper_server_token: Option<&'a str>,
-    pub whisper_server_model: Option<&'a str>,
-    pub voice_shortcut: Option<&'a str>,
-    pub selected_microphone: Option<&'a str>,
     pub main_shortcut: Option<&'a str>,
     pub show_in_dock: Option<bool>,
     pub single_click_action: Option<ClickAction>,
@@ -49,11 +44,6 @@ pub struct AppSettingsUpdate<'a> {
 pub struct AppSettings {
     pub ollama_model: String,
     pub retention_days: i64,
-    pub whisper_server_url: String,
-    pub whisper_server_token: String,
-    pub whisper_server_model: String,
-    pub voice_shortcut: String,
-    pub selected_microphone: String,
     pub main_shortcut: String,
     pub show_in_dock: bool,
     pub single_click_action: ClickAction,
@@ -209,11 +199,6 @@ impl Database {
         const KEYS: &[&str] = &[
             "ollama_model",
             "retention_days",
-            "whisper_server_url",
-            "whisper_server_token",
-            "whisper_server_model",
-            "voice_shortcut",
-            "selected_microphone",
             "main_shortcut",
             "show_in_dock",
             "single_click_action",
@@ -245,21 +230,16 @@ impl Database {
                 .and_then(|v| v.parse::<i64>().ok())
                 .filter(|d| matches!(*d, 1 | 7 | 30 | 180))
                 .unwrap_or(30),
-            whisper_server_url: take("whisper_server_url").unwrap_or_default(),
-            whisper_server_token: take("whisper_server_token").unwrap_or_default(),
-            whisper_server_model: take("whisper_server_model").unwrap_or_else(|| "whisper-1".to_string()),
-            voice_shortcut: take("voice_shortcut").unwrap_or_else(|| "option+space".to_string()),
-            selected_microphone: take("selected_microphone").unwrap_or_default(),
             main_shortcut: take("main_shortcut").unwrap_or_else(|| "cmd+shift+v".to_string()),
             show_in_dock: take("show_in_dock").map(|v| parse_bool(&v)).unwrap_or(false),
             single_click_action: take("single_click_action")
                 .as_deref()
                 .and_then(ClickAction::from_db_str)
-                .unwrap_or(ClickAction::Copy),
+                .unwrap_or(ClickAction::Paste),
             double_click_action: take("double_click_action")
                 .as_deref()
                 .and_then(ClickAction::from_db_str)
-                .unwrap_or(ClickAction::Paste),
+                .unwrap_or(ClickAction::Copy),
         })
     }
 
@@ -271,7 +251,7 @@ impl Database {
             let mut conn = self.conn.lock().unwrap();
             let tx = conn.transaction()?;
 
-            let mut set = |key: &str, value: &str| -> Result<(), rusqlite::Error> {
+            let set = |key: &str, value: &str| -> Result<(), rusqlite::Error> {
                 tx.execute(
                     "INSERT INTO settings (key, value) VALUES (?1, ?2)
                      ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -282,11 +262,6 @@ impl Database {
 
             if let Some(v) = update.ollama_model { set("ollama_model", v.trim())?; }
             if let Some(v) = update.retention_days { set("retention_days", &v.to_string())?; }
-            if let Some(v) = update.whisper_server_url { set("whisper_server_url", v.trim())?; }
-            if let Some(v) = update.whisper_server_token { set("whisper_server_token", v.trim())?; }
-            if let Some(v) = update.whisper_server_model { set("whisper_server_model", v.trim())?; }
-            if let Some(v) = update.voice_shortcut { set("voice_shortcut", v.trim())?; }
-            if let Some(v) = update.selected_microphone { set("selected_microphone", v.trim())?; }
             if let Some(v) = update.main_shortcut { set("main_shortcut", v.trim())?; }
             if let Some(v) = update.show_in_dock { set("show_in_dock", if v { "1" } else { "0" })?; }
             if let Some(v) = update.single_click_action { set("single_click_action", v.as_db_str())?; }

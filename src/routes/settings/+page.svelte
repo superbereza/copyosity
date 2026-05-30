@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import type { AppSettings, AudioInputDevice, ExcludedApp, ModelCatalog, ModelOption } from "$lib/types";
+  import type { AppSettings, ExcludedApp, ModelCatalog, ModelOption } from "$lib/types";
   import {
     addExcludedApp,
     addFrontmostAppToExcluded,
@@ -13,8 +13,6 @@
     restartAppWithSettingsOpen,
     removeExcludedApp,
     updateAppSettings,
-    rebindVoiceShortcut,
-    listMicrophones,
     checkAccessibility,
     checkOllamaStatus,
     unloadOllamaModel,
@@ -25,13 +23,12 @@
   } from "$lib/api";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
-  type TabId = "general" | "behavior" | "ai" | "voice" | "privacy" | "permissions";
+  type TabId = "general" | "behavior" | "ai" | "privacy" | "permissions";
 
   const tabs: { id: TabId; label: string }[] = [
     { id: "general", label: "General" },
     { id: "behavior", label: "Behavior" },
     { id: "ai", label: "AI & Tags" },
-    { id: "voice", label: "Voice" },
     { id: "privacy", label: "Privacy" },
     { id: "permissions", label: "Permissions" },
   ];
@@ -41,17 +38,11 @@
   let settings = $state<AppSettings>({
     ollama_model: "qwen3:4b-instruct-2507-q4_K_M",
     retention_days: 30,
-    whisper_server_url: "",
-    whisper_server_token: "",
-    whisper_server_model: "whisper-1",
-    voice_shortcut: "option+space",
-    selected_microphone: "",
     main_shortcut: "cmd+shift+v",
     show_in_dock: false,
-    single_click_action: "copy",
-    double_click_action: "paste",
+    single_click_action: "paste",
+    double_click_action: "copy",
   });
-  let microphones: AudioInputDevice[] = $state([]);
   let modelCatalog = $state<ModelCatalog>({
     total_memory_gb: 0,
     recommended_memory_gb: 0,
@@ -143,7 +134,6 @@
     loadModelCatalog();
     loadExcludedApps();
     refreshOllamaStatus();
-    listMicrophones().then((m) => (microphones = m));
     checkAccessibility().then((v) => (accessibilityGranted = v));
 
     const unlistenPull = listen<string>("ollama-pull-progress", (event) => {
@@ -169,11 +159,6 @@
       settings = await updateAppSettings({
         ollama_model: settings.ollama_model,
         retention_days: settings.retention_days,
-        whisper_server_url: settings.whisper_server_url,
-        whisper_server_token: settings.whisper_server_token,
-        whisper_server_model: settings.whisper_server_model,
-        voice_shortcut: settings.voice_shortcut,
-        selected_microphone: settings.selected_microphone,
         main_shortcut: settings.main_shortcut,
         show_in_dock: settings.show_in_dock,
         single_click_action: settings.single_click_action,
@@ -185,9 +170,7 @@
       restartRequired = dockChanged;
       savedShowInDock = settings.show_in_dock;
       taggingResult = undefined;
-      // Run post-save tasks in parallel
       await Promise.all([
-        rebindVoiceShortcut(),
         rebindMainShortcut(),
         loadModelCatalog(),
         refreshOllamaStatus(),
@@ -333,15 +316,15 @@
       <label class="settings-field">
         <span class="settings-label">Single click on card</span>
         <select class="settings-select" bind:value={settings.single_click_action}>
-          <option value="copy">Copy to clipboard</option>
           <option value="paste">Paste &amp; close window</option>
+          <option value="copy">Copy to clipboard</option>
         </select>
       </label>
-      <label class="settings-field" style="margin-top: 8px;">
+      <label class="settings-field">
         <span class="settings-label">Double click on card</span>
         <select class="settings-select" bind:value={settings.double_click_action}>
-          <option value="paste">Paste &amp; close window</option>
           <option value="copy">Copy to clipboard</option>
+          <option value="paste">Paste &amp; close window</option>
           <option value="none">Disabled (single click fires immediately)</option>
         </select>
       </label>
@@ -609,65 +592,6 @@
         <div class="settings-hint">Clipboard from excluded apps will not be stored or tagged.</div>
       {/if}
     </div>
-  </section>
-  {/if}
-
-  {#if activeTab === "voice"}
-  <section class="settings-section">
-    <div class="settings-section-title">Voice Transcription</div>
-    <div class="settings-hint" style="margin-bottom: 10px;">
-      Hold the shortcut to record, release to transcribe and paste at cursor.
-      Requires an OpenAI-compatible Whisper server.
-    </div>
-    <label class="settings-field">
-      <span class="settings-label">Shortcut (hold to record)</span>
-      <input
-        class="settings-input"
-        type="text"
-        bind:value={settings.voice_shortcut}
-        placeholder="option+space"
-      />
-      <div class="settings-hint">
-        Use: <code>cmd</code>, <code>option</code>, <code>ctrl</code>, <code>shift</code> + key.
-        Examples: <code>option+space</code>, <code>cmd+shift+r</code>, <code>ctrl+alt+space</code>
-      </div>
-    </label>
-    <label class="settings-field" style="margin-top: 8px;">
-      <span class="settings-label">Microphone</span>
-      <select class="settings-select" bind:value={settings.selected_microphone}>
-        <option value="">System default</option>
-        {#each microphones as mic}
-          <option value={mic.name}>{mic.name}{mic.is_default ? " (default)" : ""}</option>
-        {/each}
-      </select>
-    </label>
-    <label class="settings-field" style="margin-top: 8px;">
-      <span class="settings-label">Server URL</span>
-      <input
-        class="settings-input"
-        type="text"
-        bind:value={settings.whisper_server_url}
-        placeholder="http://localhost:8000/v1/audio/transcriptions"
-      />
-    </label>
-    <label class="settings-field" style="margin-top: 8px;">
-      <span class="settings-label">API Token</span>
-      <input
-        class="settings-input"
-        type="password"
-        bind:value={settings.whisper_server_token}
-        placeholder="Bearer token (optional)"
-      />
-    </label>
-    <label class="settings-field" style="margin-top: 8px;">
-      <span class="settings-label">Model</span>
-      <input
-        class="settings-input"
-        type="text"
-        bind:value={settings.whisper_server_model}
-        placeholder="whisper-1"
-      />
-    </label>
   </section>
   {/if}
 

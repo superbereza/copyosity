@@ -2,7 +2,6 @@ mod clipboard_monitor;
 mod commands;
 mod db;
 mod ollama;
-mod whisper;
 
 use db::Database;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,20 +27,6 @@ tauri_nspanel::tauri_panel!(
 );
 
 static LAST_SHOW_MS: AtomicU64 = AtomicU64::new(0);
-
-static RECORDING: std::sync::OnceLock<std::sync::Mutex<Option<whisper::RecordingSession>>> =
-    std::sync::OnceLock::new();
-
-fn recording_mutex() -> &'static std::sync::Mutex<Option<whisper::RecordingSession>> {
-    RECORDING.get_or_init(|| std::sync::Mutex::new(None))
-}
-
-static CURRENT_VOICE_SHORTCUT: std::sync::OnceLock<std::sync::Mutex<Option<Shortcut>>> =
-    std::sync::OnceLock::new();
-
-fn voice_shortcut_mutex() -> &'static std::sync::Mutex<Option<Shortcut>> {
-    CURRENT_VOICE_SHORTCUT.get_or_init(|| std::sync::Mutex::new(None))
-}
 
 static CURRENT_MAIN_SHORTCUT: std::sync::OnceLock<std::sync::Mutex<Option<Shortcut>>> =
     std::sync::OnceLock::new();
@@ -146,19 +131,6 @@ fn parse_shortcut(s: &str) -> Option<Shortcut> {
     Some(Shortcut::new(mods_opt, key))
 }
 
-pub fn register_voice_shortcut(app: &tauri::AppHandle) -> Result<String, String> {
-    let db = app.state::<std::sync::Arc<db::Database>>();
-    let settings = db.get_app_settings().map_err(|e| e.to_string())?;
-    let new_shortcut = parse_shortcut(&settings.voice_shortcut)
-        .ok_or_else(|| format!("Invalid shortcut: {}", settings.voice_shortcut))?;
-
-    register_shortcut_in_slot(app, voice_shortcut_mutex(), new_shortcut, |app, state| {
-        handle_voice_event(app, state);
-    })?;
-
-    Ok(settings.voice_shortcut)
-}
-
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -243,17 +215,9 @@ pub fn run() {
                 .build(app)?;
             app.manage(tray);
 
-            // Pre-create voice overlay panel so it's ready without stealing focus later
-            ensure_voice_overlay(app.handle());
-
             // Register main window toggle shortcut from settings
             if let Err(e) = register_main_shortcut(app.handle()) {
                 eprintln!("Main shortcut registration failed: {}", e);
-            }
-
-            // Register voice transcription shortcut from settings
-            if let Err(e) = register_voice_shortcut(app.handle()) {
-                eprintln!("Voice shortcut registration failed: {}", e);
             }
 
             let settings = db.get_app_settings().expect("Failed to load app settings");
@@ -354,10 +318,8 @@ pub fn run() {
             commands::pull_ollama_model,
             commands::unload_ollama_model,
             commands::test_ollama_tagging,
-            commands::rebind_voice_shortcut,
             commands::rebind_main_shortcut,
             commands::restart_app_with_settings_open,
-            commands::list_microphones,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -439,207 +401,11 @@ fn build_tray_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     let ver = MenuItem::with_id(app, "version", &version_label, false, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+    let check = MenuItem::with_id(app, "check_updates", "Check for Updates…", true, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    Menu::with_items(app, &[&status, &ver, &sep, &settings, &sep2, &quit])
+    Menu::with_items(app, &[&status, &ver, &sep, &settings, &check, &sep2, &quit])
 }
-
-fn handle_voice_event(app: &tauri::AppHandle, state: ShortcutState) {
-    eprintln!("[voice] event: {:?}", match state {
-        ShortcutState::Pressed => "PRESSED",
-        ShortcutState::Released => "RELEASED",
-    });
-    match state {
-        ShortcutState::Pressed => {
-            let mut rec = recording_mutex().lock().unwrap();
-            if rec.is_none() {
-                // Read selected microphone from settings
-                let mic_name = app
-                    .try_state::<std::sync::Arc<db::Database>>()
-                    .and_then(|db| db.get_app_settings().ok())
-                    .map(|s| s.selected_microphone)
-                    .filter(|s| !s.is_empty());
-                eprintln!("[voice] starting recording, mic={:?}", mic_name);
-                match whisper::RecordingSession::start(mic_name.as_deref()) {
-                    Ok(session) => {
-                        eprintln!("[voice] recording started, sample_rate={}", session.sample_rate);
-                        show_voice_overlay(app);
-                        let level_arc = session.level.clone();
-                        let emit_handle = app.clone();
-                        std::thread::spawn(move || {
-                            loop {
-                                let still_recording =
-                                    recording_mutex().lock().unwrap().is_some();
-                                if !still_recording {
-                                    break;
-                                }
-                                let lvl =
-                                    level_arc.load(std::sync::atomic::Ordering::Relaxed);
-                                if let Some(win) = emit_handle.get_webview_window("voice_overlay") {
-                                    let _ = win.emit("audio-level", lvl);
-                                } else {
-                                    let _ = emit_handle.emit("audio-level", lvl);
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(60));
-                            }
-                        });
-                        *rec = Some(session);
-                    }
-                    Err(e) => eprintln!("[voice] FAILED to start recording: {}", e),
-                }
-            } else {
-                eprintln!("[voice] already recording, ignoring press");
-            }
-        }
-        ShortcutState::Released => {
-            let session = recording_mutex().lock().unwrap().take();
-            if let Some(session) = session {
-                let app = app.clone();
-                hide_voice_overlay(&app);
-                std::thread::spawn(move || {
-                    let (samples, sample_rate) = session.finish();
-                    eprintln!("[voice] stopped, {} samples at {}Hz ({:.1}s)",
-                        samples.len(), sample_rate,
-                        samples.len() as f64 / sample_rate as f64);
-                    let db = app.state::<std::sync::Arc<db::Database>>();
-                    let settings = match db.get_app_settings() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            eprintln!("[voice] failed to load settings: {}", e);
-                            return;
-                        }
-                    };
-                    if settings.whisper_server_url.is_empty() {
-                        eprintln!("[voice] ERROR: Whisper server URL is not configured");
-                        return;
-                    }
-                    eprintln!("[voice] sending to {}", settings.whisper_server_url);
-                    match whisper::transcribe_audio(
-                        samples,
-                        sample_rate,
-                        &settings.whisper_server_url,
-                        &settings.whisper_server_token,
-                        &settings.whisper_server_model,
-                    ) {
-                        Ok(text) if !text.is_empty() => {
-                            eprintln!("[voice] transcription: \"{}\"", text);
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                let _ = clipboard.set_text(&text);
-                            }
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                            simulate_cmd_v();
-                        }
-                        Ok(_) => eprintln!("[voice] transcription returned empty text"),
-                        Err(e) => eprintln!("[voice] transcription ERROR: {}", e),
-                    }
-                });
-            }
-        }
-    }
-}
-
-fn ensure_voice_overlay(app: &tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
-    {
-        use tauri_nspanel::ManagerExt;
-        // Already created
-        if app.get_webview_panel("voice_overlay").is_ok() {
-            return;
-        }
-
-        let builder = tauri::WebviewWindowBuilder::new(
-            app,
-            "voice_overlay",
-            tauri::WebviewUrl::App("/overlay".into()),
-        )
-        .title("")
-        .inner_size(160.0, 52.0)
-        .resizable(false)
-        .decorations(false)
-        .transparent(true)
-        .skip_taskbar(true)
-        .visible(false)
-        .center();
-
-        if let Ok(win) = builder.build() {
-            use tauri_nspanel::panel::NSWindowStyleMask;
-            use tauri_nspanel::WebviewWindowExt;
-
-            if let Ok(panel) = win.to_panel::<CopyosityPanel>() {
-                panel.set_level(24);
-                panel.set_style_mask(
-                    NSWindowStyleMask::Borderless
-                        | NSWindowStyleMask::NonactivatingPanel,
-                );
-                panel.set_becomes_key_only_if_needed(true);
-            }
-        }
-    }
-}
-
-fn show_voice_overlay(app: &tauri::AppHandle) {
-    ensure_voice_overlay(app);
-
-    #[cfg(target_os = "macos")]
-    {
-        use tauri_nspanel::ManagerExt;
-        if let Ok(panel) = app.get_webview_panel("voice_overlay") {
-            panel.order_front_regardless();
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Some(win) = app.get_webview_window("voice_overlay") {
-            let _ = win.show();
-        }
-    }
-}
-
-fn hide_voice_overlay(app: &tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
-    {
-        use tauri_nspanel::ManagerExt;
-        if let Ok(panel) = app.get_webview_panel("voice_overlay") {
-            panel.hide();
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Some(win) = app.get_webview_window("voice_overlay") {
-            let _ = win.close();
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn simulate_cmd_v() {
-    unsafe {
-        type CGEventSourceRef = *mut std::ffi::c_void;
-        type CGEventRef = *mut std::ffi::c_void;
-        #[link(name = "CoreGraphics", kind = "framework")]
-        extern "C" {
-            fn CGEventCreateKeyboardEvent(source: CGEventSourceRef, keycode: u16, key_down: bool) -> CGEventRef;
-            fn CGEventSetFlags(event: CGEventRef, flags: u64);
-            fn CGEventPost(tap: u32, event: CGEventRef);
-            fn CFRelease(cf: *mut std::ffi::c_void);
-        }
-        let down = CGEventCreateKeyboardEvent(std::ptr::null_mut(), 9, true);
-        let up = CGEventCreateKeyboardEvent(std::ptr::null_mut(), 9, false);
-        if !down.is_null() && !up.is_null() {
-            CGEventSetFlags(down, 0x00100000);
-            CGEventSetFlags(up, 0x00100000);
-            CGEventPost(0, down);
-            CGEventPost(0, up);
-            CFRelease(down);
-            CFRelease(up);
-        }
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn simulate_cmd_v() {}
 
 pub(crate) fn position_window_bottom(window: &tauri::WebviewWindow) {
     use tauri::PhysicalPosition;

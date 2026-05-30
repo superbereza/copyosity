@@ -158,11 +158,6 @@ pub fn update_app_settings(
     db: State<'_, Arc<Database>>,
     ollama_model: Option<String>,
     retention_days: Option<i64>,
-    whisper_server_url: Option<String>,
-    whisper_server_token: Option<String>,
-    whisper_server_model: Option<String>,
-    voice_shortcut: Option<String>,
-    selected_microphone: Option<String>,
     main_shortcut: Option<String>,
     show_in_dock: Option<bool>,
     single_click_action: Option<ClickAction>,
@@ -172,11 +167,6 @@ pub fn update_app_settings(
         .update_app_settings(AppSettingsUpdate {
             ollama_model: ollama_model.as_deref(),
             retention_days,
-            whisper_server_url: whisper_server_url.as_deref(),
-            whisper_server_token: whisper_server_token.as_deref(),
-            whisper_server_model: whisper_server_model.as_deref(),
-            voice_shortcut: voice_shortcut.as_deref(),
-            selected_microphone: selected_microphone.as_deref(),
             main_shortcut: main_shortcut.as_deref(),
             show_in_dock,
             single_click_action,
@@ -403,11 +393,6 @@ pub fn test_ollama_tagging() -> Result<Option<Vec<String>>, String> {
 }
 
 #[tauri::command]
-pub fn rebind_voice_shortcut(app: tauri::AppHandle) -> Result<String, String> {
-    crate::register_voice_shortcut(&app)
-}
-
-#[tauri::command]
 pub fn rebind_main_shortcut(app: tauri::AppHandle) -> Result<String, String> {
     crate::register_main_shortcut(&app)
 }
@@ -435,7 +420,3 @@ pub fn restart_app_with_settings_open(
     }
 }
 
-#[tauri::command]
-pub fn list_microphones() -> Result<Vec<crate::whisper::AudioInputDevice>, String> {
-    Ok(crate::whisper::list_input_devices())
-}

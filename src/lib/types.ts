@@ -26,20 +26,10 @@ export type ClickAction = "copy" | "paste" | "none";
 export interface AppSettings {
   ollama_model: string;
   retention_days: number;
-  whisper_server_url: string;
-  whisper_server_token: string;
-  whisper_server_model: string;
-  voice_shortcut: string;
-  selected_microphone: string;
   main_shortcut: string;
   show_in_dock: boolean;
   single_click_action: ClickAction;
   double_click_action: ClickAction;
-}
-
-export interface AudioInputDevice {
-  name: string;
-  is_default: boolean;
 }
 
 export interface ModelOption {

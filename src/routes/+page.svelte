@@ -25,15 +25,15 @@
   let gridEl: HTMLDivElement | undefined = $state();
   let visible = $state(false);
   let revealCycle = $state(0);
-  let singleClickAction = $state<ClickAction>("copy");
-  let doubleClickAction = $state<ClickAction>("paste");
+  let singleClickAction = $state<ClickAction>("paste");
+  let doubleClickAction = $state<ClickAction>("copy");
   const hiddenTopTags = new Set(["code", "otp", "token", "log"]);
 
   async function loadBehaviorSettings() {
     try {
       const s = await getAppSettings();
-      singleClickAction = (s.single_click_action as ClickAction) ?? "copy";
-      doubleClickAction = (s.double_click_action as ClickAction) ?? "paste";
+      singleClickAction = (s.single_click_action as ClickAction) ?? "paste";
+      doubleClickAction = (s.double_click_action as ClickAction) ?? "copy";
     } catch (e) {
       console.error("Failed to load behavior settings", e);
     }

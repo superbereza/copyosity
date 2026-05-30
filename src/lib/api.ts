@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppSettings, AudioInputDevice, ClipboardEntry, Collection, ExcludedApp, ModelCatalog } from "./types";
+import type { AppSettings, ClipboardEntry, Collection, ExcludedApp, ModelCatalog } from "./types";
 
 export async function getEntries(opts?: {
   limit?: number;
@@ -56,11 +56,6 @@ export async function getAppSettings(): Promise<AppSettings> {
 export async function updateAppSettings(opts: {
   ollama_model?: string | null;
   retention_days?: number | null;
-  whisper_server_url?: string | null;
-  whisper_server_token?: string | null;
-  whisper_server_model?: string | null;
-  voice_shortcut?: string | null;
-  selected_microphone?: string | null;
   main_shortcut?: string | null;
   show_in_dock?: boolean | null;
   single_click_action?: string | null;
@@ -69,11 +64,6 @@ export async function updateAppSettings(opts: {
   return invoke("update_app_settings", {
     ollamaModel: opts.ollama_model ?? null,
     retentionDays: opts.retention_days ?? null,
-    whisperServerUrl: opts.whisper_server_url ?? null,
-    whisperServerToken: opts.whisper_server_token ?? null,
-    whisperServerModel: opts.whisper_server_model ?? null,
-    voiceShortcut: opts.voice_shortcut ?? null,
-    selectedMicrophone: opts.selected_microphone ?? null,
     mainShortcut: opts.main_shortcut ?? null,
     showInDock: opts.show_in_dock ?? null,
     singleClickAction: opts.single_click_action ?? null,
@@ -87,14 +77,6 @@ export async function rebindMainShortcut(): Promise<string> {
 
 export async function restartAppWithSettingsOpen(): Promise<void> {
   return invoke("restart_app_with_settings_open");
-}
-
-export async function listMicrophones(): Promise<AudioInputDevice[]> {
-  return invoke("list_microphones");
-}
-
-export async function rebindVoiceShortcut(): Promise<string> {
-  return invoke("rebind_voice_shortcut");
 }
 
 export async function getModelCatalog(): Promise<ModelCatalog> {

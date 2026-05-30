@@ -4,8 +4,8 @@ A fast, privacy-first clipboard manager for macOS. Lives in your menu bar, opens
 
 Built with Tauri 2, Svelte 5, Rust, and SQLite.
 
-> This is a fork of [vakovalskii/copyosity](https://github.com/vakovalskii/copyosity) with a reworked
-> Settings UI and configurable behavior.
+> This is a fork of [vakovalskii/copyosity](https://github.com/vakovalskii/copyosity) — reworked
+> Settings UI, configurable behavior, and **text-only**: voice transcription removed.
 
 ## Why Copyosity
 
@@ -44,7 +44,6 @@ Built with Tauri 2, Svelte 5, Rust, and SQLite.
 - **General** — configurable main hotkey, Show in Dock toggle, history retention
 - **Behavior** — single/double click actions
 - **AI & Tags** — Ollama wizard and model selection
-- **Voice** — Whisper transcription endpoint + hold-to-record hotkey
 - **Privacy** — excluded apps
 - **Permissions** — Accessibility check, clear history
 
@@ -65,7 +64,7 @@ cd copyosity
 npm install
 npm run tauri build
 # result: src-tauri/target/release/bundle/macos/Copyosity.app
-#         src-tauri/target/release/bundle/dmg/Copyosity_0.3.1_aarch64.dmg
+#         src-tauri/target/release/bundle/dmg/Copyosity_0.4.0_aarch64.dmg
 ```
 
 Then drag `Copyosity.app` into `/Applications`. On first launch macOS may complain that
@@ -94,7 +93,6 @@ For automatic clipboard tagging:
 | Action | What it does |
 |--------|-------------|
 | Main hotkey (default `Cmd + Shift + V`) | Open / close clipboard history |
-| Voice hotkey (default `Option + Space`, hold) | Record → transcribe → paste at cursor |
 | Single click on card | Configurable in Settings → Behavior |
 | Double click on card | Configurable in Settings → Behavior |
 | `Escape` | Hide window |
@@ -107,8 +105,6 @@ For automatic clipboard tagging:
 
 - All data stored locally in `~/Library/Application Support/com.vkovalskii.copyosity/`
 - AI tagging runs on `127.0.0.1` via Ollama — nothing leaves your machine
-- Voice transcription uses the Whisper-compatible URL you configure in Settings → Voice
-  (defaults to empty — feature off until you point it somewhere)
 - Exclude sensitive apps in Settings → Privacy
 - Clear history anytime from Settings → Permissions
 

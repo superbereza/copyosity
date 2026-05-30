@@ -7,8 +7,8 @@
   let {
     entry,
     selected = false,
-    singleClickAction = "copy",
-    doubleClickAction = "paste",
+    singleClickAction = "paste",
+    doubleClickAction = "copy",
     onpasted,
     ondeleted,
     onpinned,
