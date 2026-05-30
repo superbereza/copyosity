@@ -1,606 +1,299 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import type { AppSettings, ExcludedApp, ModelCatalog, ModelOption } from "$lib/types";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import type { ClickAction, ClipboardEntry, Collection } from "$lib/types";
   import {
-    addExcludedApp,
-    addFrontmostAppToExcluded,
-    clearHistory,
+    getEntries,
+    getCollections,
     getAppSettings,
-    getExcludedApps,
-    getModelCatalog,
-    rebindMainShortcut,
-    restartAppWithSettingsOpen,
-    removeExcludedApp,
-    updateAppSettings,
-    checkAccessibility,
-    checkOllamaStatus,
-    unloadOllamaModel,
-    startOllamaServer,
-    pullOllamaModel,
-    testOllamaTagging,
-    type OllamaStatus,
+    hideMainWindow,
+    openSettingsWindow,
   } from "$lib/api";
-  import { openUrl } from "@tauri-apps/plugin-opener";
+  import ClipboardCard from "$lib/components/ClipboardCard.svelte";
+  import SearchBar from "$lib/components/SearchBar.svelte";
+  import CollectionTabs from "$lib/components/CollectionTabs.svelte";
 
-  type TabId = "general" | "behavior" | "ai" | "privacy" | "permissions";
+  let entries: ClipboardEntry[] = $state([]);
+  let collections: Collection[] = $state([]);
+  let searchQuery = $state("");
+  let activeCollectionId: number | null = $state(null);
+  let pinnedOnly = $state(false);
+  let activeTag = $state<string | null>(null);
+  let selectedIndex = $state(-1);
+  let gridEl: HTMLDivElement | undefined = $state();
+  let visible = $state(false);
+  let revealCycle = $state(0);
+  let singleClickAction = $state<ClickAction>("paste");
+  let doubleClickAction = $state<ClickAction>("copy");
+  const hiddenTopTags = new Set(["code", "otp", "token", "log"]);
 
-  const tabs: { id: TabId; label: string }[] = [
-    { id: "general", label: "General" },
-    { id: "behavior", label: "Behavior" },
-    { id: "ai", label: "AI & Tags" },
-    { id: "privacy", label: "Privacy" },
-    { id: "permissions", label: "Permissions" },
-  ];
-
-  let activeTab = $state<TabId>("general");
-
-  let settings = $state<AppSettings>({
-    ollama_model: "qwen3:4b-instruct-2507-q4_K_M",
-    retention_days: 30,
-    main_shortcut: "cmd+shift+v",
-    show_in_dock: false,
-    single_click_action: "paste",
-    double_click_action: "copy",
-  });
-  let modelCatalog = $state<ModelCatalog>({
-    total_memory_gb: 0,
-    recommended_memory_gb: 0,
-    options: [],
-  });
-  let selectedModelPreset = $state("__custom__");
-  let excludedApps: ExcludedApp[] = $state([]);
-  let excludedAppInput = $state("");
-  let savingSettings = $state(false);
-  let settingsNotice = $state("");
-  let savedModel = $state("");
-  let savedShowInDock = $state<boolean | null>(null);
-  let restartRequired = $state(false);
-
-  let accessibilityGranted = $state<boolean | null>(null);
-
-  let ollamaStatus = $state<OllamaStatus | null>(null);
-  let ollamaLoading = $state(false);
-  let pullProgress = $state("");
-  let taggingResult = $state<string[] | null | undefined>(undefined);
-  let taggingLoading = $state(false);
-
-  const retentionOptions = [
-    { label: "1 day", value: 1 },
-    { label: "1 week", value: 7 },
-    { label: "1 month", value: 30 },
-    { label: "6 months", value: 180 },
-  ];
-
-  async function loadSettings() {
-    settings = await getAppSettings();
-    selectedModelPreset = settings.ollama_model;
-    savedModel = settings.ollama_model;
-    savedShowInDock = settings.show_in_dock;
-  }
-
-  async function loadModelCatalog() {
-    modelCatalog = await getModelCatalog();
-    if (!modelCatalog.options.some((o) => o.value === settings.ollama_model)) {
-      selectedModelPreset = "__custom__";
-    }
-  }
-
-  async function loadExcludedApps() {
-    excludedApps = await getExcludedApps();
-  }
-
-  async function refreshOllamaStatus() {
-    ollamaLoading = true;
-    taggingResult = undefined;
+  async function loadBehaviorSettings() {
     try {
-      ollamaStatus = await checkOllamaStatus();
-    } finally {
-      ollamaLoading = false;
+      const s = await getAppSettings();
+      singleClickAction = (s.single_click_action as ClickAction) ?? "paste";
+      doubleClickAction = (s.double_click_action as ClickAction) ?? "copy";
+    } catch (e) {
+      console.error("Failed to load behavior settings", e);
     }
   }
 
-  async function handleStartServer() {
-    ollamaLoading = true;
-    try {
-      await startOllamaServer();
-      await refreshOllamaStatus();
-    } finally {
-      ollamaLoading = false;
-    }
+  async function loadEntries() {
+    entries = await getEntries({
+      collection_id: activeCollectionId,
+      pinned_only: pinnedOnly,
+      search: searchQuery || null,
+    });
   }
 
-  async function handlePullModel() {
-    ollamaLoading = true;
-    pullProgress = "Starting download...";
-    await pullOllamaModel();
-    // Command returns immediately, progress comes via events
-    // ollama-pull-done will reset the state
+  async function loadCollections() {
+    collections = await getCollections();
   }
 
-  async function handleTestTagging() {
-    taggingLoading = true;
-    taggingResult = undefined;
-    try {
-      taggingResult = await testOllamaTagging();
-    } finally {
-      taggingLoading = false;
-    }
+  function showWindow() {
+    window.getSelection()?.removeAllRanges();
+    searchQuery = "";
+    activeTag = null;
+    selectedIndex = -1;
+    loadEntries();
+    revealCycle += 1;
+    // Reset scroll to start
+    if (gridEl) gridEl.scrollLeft = 0;
+    // Start hidden, then animate in next frame
+    visible = false;
+    requestAnimationFrame(() => {
+      visible = true;
+    });
+  }
+
+  function animateOut() {
+    visible = false;
+    searchQuery = "";
+    activeTag = null;
+    selectedIndex = -1;
+    hideMainWindow();
+  }
+
+  function forceHideWindow() {
+    visible = false;
+    searchQuery = "";
+    activeTag = null;
+    selectedIndex = -1;
+    hideMainWindow();
   }
 
   onMount(() => {
-    // Load everything in parallel instead of sequentially
-    loadSettings();
-    loadModelCatalog();
-    loadExcludedApps();
-    refreshOllamaStatus();
-    checkAccessibility().then((v) => (accessibilityGranted = v));
+    loadEntries();
+    loadCollections();
+    loadBehaviorSettings();
 
-    const unlistenPull = listen<string>("ollama-pull-progress", (event) => {
-      pullProgress = event.payload;
+    // Tell Rust we're loaded — it will hide the off-screen warmup window
+    invoke("frontend_ready");
+
+    // Debounce entry reloads — clipboard-changed and entry-tagged can fire together
+    let reloadTimer: ReturnType<typeof setTimeout>;
+    function scheduleReload() {
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => loadEntries(), 100);
+    }
+
+    const unlistenClipboard = listen("clipboard-changed", scheduleReload);
+    const unlistenTagged = listen("entry-tagged", scheduleReload);
+
+    const unlistenShow = listen("window-show", () => {
+      showWindow();
+      loadBehaviorSettings();
     });
 
-    const unlistenPullDone = listen<boolean>("ollama-pull-done", async (event) => {
-      ollamaLoading = false;
-      pullProgress = "";
-      await refreshOllamaStatus();
+    const unlistenOpenSettings = listen("open-settings", () => {
+      openSettingsWindow();
     });
+
+    const handleKeydown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        forceHideWindow();
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        selectedIndex = Math.min(selectedIndex + 1, filteredEntries.length - 1);
+        scrollToSelected();
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        selectedIndex = Math.max(selectedIndex - 1, 0);
+        scrollToSelected();
+      }
+      if (e.key === "Enter" && selectedIndex >= 0 && selectedIndex < filteredEntries.length) {
+        e.preventDefault();
+        const entry = filteredEntries[selectedIndex];
+        if (entry.text_content) {
+          import("$lib/api").then(({ pasteEntry }) => {
+            pasteEntry(entry.text_content!);
+            animateOut();
+          });
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeydown);
 
     return () => {
-      unlistenPull.then((fn) => fn());
-      unlistenPullDone.then((fn) => fn());
+      clearTimeout(reloadTimer);
+      clearTimeout(debounceTimer);
+      unlistenClipboard.then((fn) => fn());
+      unlistenTagged.then((fn) => fn());
+      unlistenShow.then((fn) => fn());
+      unlistenOpenSettings.then((fn) => fn());
+      window.removeEventListener("keydown", handleKeydown);
     };
   });
 
-  async function saveSettings() {
-    savingSettings = true;
-    settingsNotice = "";
-    try {
-      settings = await updateAppSettings({
-        ollama_model: settings.ollama_model,
-        retention_days: settings.retention_days,
-        main_shortcut: settings.main_shortcut,
-        show_in_dock: settings.show_in_dock,
-        single_click_action: settings.single_click_action,
-        double_click_action: settings.double_click_action,
-      });
-      const dockChanged = savedShowInDock !== null && savedShowInDock !== settings.show_in_dock;
-      savedModel = settings.ollama_model;
-      settingsNotice = dockChanged ? "Saved — restart required for Dock change" : "Saved";
-      restartRequired = dockChanged;
-      savedShowInDock = settings.show_in_dock;
-      taggingResult = undefined;
-      await Promise.all([
-        rebindMainShortcut(),
-        loadModelCatalog(),
-        refreshOllamaStatus(),
-      ]);
-    } finally {
-      savingSettings = false;
+  function scrollToSelected() {
+    if (!gridEl) return;
+    const cards = gridEl.querySelectorAll(".card");
+    if (cards[selectedIndex]) {
+      cards[selectedIndex].scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
     }
   }
 
-  function handleModelPresetChange(value: string) {
-    selectedModelPreset = value;
-    if (value !== "__custom__") {
-      settings.ollama_model = value;
+  function handleSearch(q: string) {
+    searchQuery = q;
+    selectedIndex = -1;
+    loadEntries();
+  }
+
+  function handleCollectionSelect(id: number | null) {
+    pinnedOnly = id === -1;
+    activeCollectionId = id === -1 ? null : id;
+    activeTag = null;
+    selectedIndex = -1;
+    loadEntries();
+  }
+
+  function handleEntryAction() {
+    loadEntries();
+  }
+
+  function handlePasted() {
+    animateOut();
+  }
+
+  let debounceTimer: ReturnType<typeof setTimeout>;
+  function debouncedSearch(q: string) {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => handleSearch(q), 150);
+  }
+
+  let topTags = $derived.by(() => {
+    const counts = new Map<string, number>();
+
+    for (const entry of entries) {
+      for (const tag of entry.tags ?? []) {
+        if (hiddenTopTags.has(tag)) continue;
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
     }
-  }
 
-  async function handleAddExcludedApp() {
-    const value = excludedAppInput.trim();
-    if (!value) return;
-    await addExcludedApp(value);
-    excludedAppInput = "";
-    await loadExcludedApps();
-  }
-
-  async function handleAddFrontmostApp() {
-    const added = await addFrontmostAppToExcluded();
-    settingsNotice = added ? `Excluded ${added}` : "No active app detected";
-    await loadExcludedApps();
-  }
-
-  async function handleRemoveExcludedApp(id: number) {
-    await removeExcludedApp(id);
-    await loadExcludedApps();
-  }
-
-  async function handleClearHistory() {
-    await clearHistory();
-    settingsNotice = "History cleared";
-  }
-
-  let selectedModelMeta = $derived.by<ModelOption | null>(() => {
-    return modelCatalog.options.find((o) => o.value === settings.ollama_model) ?? null;
+    return [...counts.entries()]
+      .sort((a, b) => {
+        if (b[1] !== a[1]) return b[1] - a[1];
+        return a[0].localeCompare(b[0]);
+      })
+      .slice(0, 8);
   });
 
-  let modelDirty = $derived(settings.ollama_model !== savedModel);
-
-  // Tag non-interactive descendants with `data-tauri-drag-region` and keep
-  // tagging as tabs swap subtrees.
-  function dragRegion(node: HTMLElement) {
-    const INTERACTIVE = "button, input, select, textarea, a, label, [contenteditable]";
-    function apply(el: Element) {
-      if (!(el instanceof HTMLElement)) return;
-      if (!el.matches(INTERACTIVE) && !el.closest(INTERACTIVE)) {
-        el.setAttribute("data-tauri-drag-region", "");
-      }
-      for (const child of Array.from(el.children)) apply(child);
-    }
-    apply(node);
-
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const added of Array.from(m.addedNodes)) {
-          if (added instanceof HTMLElement) apply(added);
-        }
-      }
-    });
-    observer.observe(node, { childList: true, subtree: true });
-
-    return { destroy: () => observer.disconnect() };
-  }
+  let filteredEntries = $derived.by(() => {
+    if (!activeTag) return entries;
+    const tag = activeTag;
+    return entries.filter((entry) => (entry.tags ?? []).includes(tag));
+  });
 </script>
 
-<div class="settings-page" use:dragRegion>
-
-  {#if restartRequired}
-    <div class="restart-banner">
-      <div class="restart-banner-text">Restart Copyosity to apply Dock change.</div>
-      <button class="restart-banner-btn" type="button" onclick={() => restartAppWithSettingsOpen()}>
-        Restart
-      </button>
-    </div>
-  {/if}
-
-  <nav class="settings-tabs" aria-label="Settings sections">
-    {#each tabs as tab}
+<div class="app" class:visible>
+  <header class="header">
+    <SearchBar value={searchQuery} onchange={debouncedSearch} />
+    <CollectionTabs
+      {collections}
+      activeId={activeCollectionId}
+      activePinned={pinnedOnly}
+      onselect={handleCollectionSelect}
+      onupdate={loadCollections}
+    />
+    <div class="header-actions">
       <button
+        class="settings-btn"
         type="button"
-        class="settings-tab"
-        class:active={activeTab === tab.id}
-        onclick={() => (activeTab = tab.id)}
+        aria-label="Open settings"
+        onclick={() => openSettingsWindow()}
       >
-        {tab.label}
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.03 7.03 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.22-1.13.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.62-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.41 1.05.72 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.58-.22 1.13-.53 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
+          />
+        </svg>
       </button>
-    {/each}
-  </nav>
-
-  {#if activeTab === "general"}
-    <section class="settings-section">
-      <div class="settings-section-title">Main Shortcut</div>
-      <label class="settings-field">
-        <span class="settings-label">Open / close clipboard history</span>
-        <input
-          class="settings-input"
-          type="text"
-          bind:value={settings.main_shortcut}
-          placeholder="cmd+shift+v"
-        />
-        <div class="settings-hint">
-          Use: <code>cmd</code>, <code>option</code>, <code>ctrl</code>, <code>shift</code> + key.
-          Examples: <code>cmd+shift+v</code>, <code>ctrl+space</code>, <code>option+v</code>
-        </div>
-      </label>
-    </section>
-
-    <section class="settings-section">
-      <div class="settings-section-title">Dock</div>
-      <label class="settings-toggle">
-        <input type="checkbox" bind:checked={settings.show_in_dock} />
-        <span class="settings-toggle-label">Show in Dock</span>
-      </label>
-      <div class="settings-hint">
-        When off, Copyosity runs as a macOS Accessory app — visible only in the menu bar.
-        Changing this requires an app restart; you'll be prompted after saving.
-      </div>
-    </section>
-
-    <section class="settings-section">
-      <div class="settings-section-title">Storage</div>
-      <label class="settings-field">
-        <span class="settings-label">History retention</span>
-        <select class="settings-select" bind:value={settings.retention_days}>
-          {#each retentionOptions as option}
-            <option value={option.value}>{option.label}</option>
-          {/each}
-        </select>
-      </label>
-    </section>
-  {/if}
-
-  {#if activeTab === "behavior"}
-    <section class="settings-section">
-      <div class="settings-section-title">Click Behavior</div>
-      <label class="settings-field">
-        <span class="settings-label">Single click on card</span>
-        <select class="settings-select" bind:value={settings.single_click_action}>
-          <option value="paste">Paste &amp; close window</option>
-          <option value="copy">Copy to clipboard</option>
-        </select>
-      </label>
-      <label class="settings-field">
-        <span class="settings-label">Double click on card</span>
-        <select class="settings-select" bind:value={settings.double_click_action}>
-          <option value="copy">Copy to clipboard</option>
-          <option value="paste">Paste &amp; close window</option>
-          <option value="none">Disabled (single click fires immediately)</option>
-        </select>
-      </label>
-      <div class="settings-hint">
-        When double click is disabled, single click triggers without a 250ms delay.
-        The <code>Enter</code> key always pastes and closes (used by keyboard navigation).
-        The dedicated <code>⎘</code> button on each card always copies regardless of these settings.
-      </div>
-    </section>
-  {/if}
-
-  {#if activeTab === "permissions"}
-  <section class="settings-section">
-    <div class="settings-section-title">Permissions</div>
-    <div class="status-step">
-      <div class="status-row">
-        <span class="status-dot" class:ok={accessibilityGranted === true} class:fail={accessibilityGranted === false} class:checking={accessibilityGranted === null}></span>
-        <span class="status-text">
-          {accessibilityGranted === null ? "Checking..." : accessibilityGranted ? "Accessibility granted" : "Accessibility not granted"}
-        </span>
-        {#if accessibilityGranted === false}
-          <button class="status-action" type="button" onclick={async () => { accessibilityGranted = await checkAccessibility(); }}>
-            Request
-          </button>
-        {:else if accessibilityGranted === true}
-          <button class="status-action" type="button" onclick={async () => { accessibilityGranted = await checkAccessibility(); }}>
-            Recheck
-          </button>
-        {/if}
-      </div>
-      {#if accessibilityGranted === false}
-        <div class="status-hint">
-          Required for paste automation (Cmd+V) and global shortcut.
-          Click "Request" to open System Settings, then enable Copyosity under Privacy → Accessibility.
-        </div>
-      {/if}
     </div>
-  </section>
+  </header>
 
-  <section class="settings-section">
-    <div class="settings-section-title">Danger zone</div>
-    <button class="settings-item danger" type="button" onclick={handleClearHistory}>
-      Clear unpinned history
-    </button>
-  </section>
+  {#if topTags.length > 0}
+    <div class="tag-groups">
+      <button
+        class="tag-group-chip"
+        class:active={!activeTag}
+        type="button"
+        onclick={() => {
+          activeTag = null;
+          selectedIndex = -1;
+        }}
+      >
+        All tags
+      </button>
+
+      {#each topTags as [tag, count]}
+        <button
+          class="tag-group-chip"
+          class:active={activeTag === tag}
+          type="button"
+          onclick={() => {
+            activeTag = tag;
+            selectedIndex = -1;
+          }}
+        >
+          <span>{tag}</span>
+          <span class="tag-group-count">{count}</span>
+        </button>
+      {/each}
+    </div>
   {/if}
 
-  {#if activeTab === "ai"}
-  <section class="settings-section">
-    <div class="settings-section-title">Local AI Status</div>
-
-    {#if ollamaStatus === null}
-      <div class="status-row">
-        <span class="status-dot checking"></span>
-        <span class="status-text">Checking...</span>
+  <div class="grid-container" bind:this={gridEl}>
+    {#if filteredEntries.length === 0}
+      <div class="empty-state">
+        {#if searchQuery || activeTag}
+          <p>No results for "{searchQuery}"</p>
+        {:else}
+          <p>Clipboard history is empty</p>
+          <p class="hint">Copy something to get started</p>
+        {/if}
       </div>
     {:else}
-      <!-- Step 1: Ollama installed -->
-      <div class="status-step">
-        <div class="status-row">
-          <span class="status-dot" class:ok={ollamaStatus.cli_installed} class:fail={!ollamaStatus.cli_installed}></span>
-          <span class="status-text">
-            {ollamaStatus.cli_installed ? "Ollama installed" : "Ollama not installed"}
-          </span>
-          {#if !ollamaStatus.cli_installed}
-            <button class="status-action" type="button" onclick={() => openUrl("https://ollama.com/download")}>
-              Open ollama.com
-            </button>
-          {/if}
+      {#each filteredEntries as entry, i (`${revealCycle}-${activeTag ?? 'all'}-${entry.id}`)}
+        <div class="card-wrapper" style="animation-delay: {Math.min(i * 30, 300)}ms">
+          <ClipboardCard
+            {entry}
+            selected={i === selectedIndex}
+            {singleClickAction}
+            {doubleClickAction}
+            onpasted={handlePasted}
+            ondeleted={handleEntryAction}
+            onpinned={handleEntryAction}
+          />
         </div>
-        {#if !ollamaStatus.cli_installed}
-          <div class="status-hint">
-            Ollama runs AI models locally on your machine. Download it from
-            <button class="link-btn" type="button" onclick={() => openUrl("https://ollama.com/download")}>ollama.com</button>,
-            install the app, and click "Check again".
-          </div>
-        {/if}
-      </div>
-
-      <!-- Step 2: Server running -->
-      <div class="status-step">
-        <div class="status-row">
-          <span class="status-dot" class:ok={ollamaStatus.server_running} class:fail={ollamaStatus.cli_installed && !ollamaStatus.server_running} class:disabled={!ollamaStatus.cli_installed}></span>
-          <span class="status-text" class:dimmed={!ollamaStatus.cli_installed}>
-            {ollamaStatus.server_running ? "Server running" : "Server not running"}
-          </span>
-          {#if ollamaStatus.cli_installed && !ollamaStatus.server_running}
-            <button class="status-action" type="button" disabled={ollamaLoading} onclick={handleStartServer}>
-              {#if ollamaLoading}<span class="spinner"></span> Starting...{:else}Start{/if}
-            </button>
-          {/if}
-        </div>
-        {#if ollamaStatus.cli_installed && !ollamaStatus.server_running}
-          <div class="status-hint">
-            Ollama server is not running. Click "Start" to launch it, or run
-            <code>ollama serve</code> in your terminal.
-          </div>
-        {/if}
-      </div>
-
-      <!-- Step 3: Model installed -->
-      <div class="status-step">
-        <div class="status-row">
-          <span class="status-dot" class:ok={ollamaStatus.model_installed} class:fail={ollamaStatus.server_running && !ollamaStatus.model_installed} class:disabled={!ollamaStatus.server_running}></span>
-          <span class="status-text" class:dimmed={!ollamaStatus.server_running}>
-            {ollamaStatus.model_installed ? `Model ready` : `Model not installed`}
-          </span>
-          {#if ollamaStatus.server_running && !ollamaStatus.model_installed}
-            <button class="status-action" type="button" disabled={ollamaLoading} onclick={handlePullModel}>
-              {#if ollamaLoading}<span class="spinner"></span> Pulling...{:else}Download{/if}
-            </button>
-          {/if}
-          {#if ollamaStatus.model_installed}
-            <button class="status-action" type="button" onclick={async () => { await unloadOllamaModel(); settingsNotice = "Model unloaded from memory"; }}>
-              Unload
-            </button>
-          {/if}
-        </div>
-        {#if pullProgress}
-          <div class="status-hint pull-progress">
-            <span class="spinner"></span> {pullProgress}
-          </div>
-        {:else if ollamaStatus.server_running && !ollamaStatus.model_installed}
-          <div class="status-hint">
-            Model <code>{ollamaStatus.model_name}</code> needs to be downloaded.
-            Click "Download" or run <code>ollama pull {ollamaStatus.model_name}</code> in terminal.
-            This may take a few minutes depending on your connection.
-          </div>
-        {:else if ollamaStatus.model_installed}
-          <div class="status-hint ok">
-            Using <code>{ollamaStatus.model_name}</code>
-          </div>
-        {/if}
-      </div>
-
-      <!-- Step 4: Tagging test -->
-      <div class="status-step">
-        <div class="status-row">
-          <span class="status-dot" class:ok={taggingResult !== undefined && taggingResult !== null} class:fail={taggingResult === null} class:disabled={!ollamaStatus.model_installed}></span>
-          <span class="status-text" class:dimmed={!ollamaStatus.model_installed}>
-            {#if taggingResult === undefined}
-              Tagging not tested
-            {:else if taggingResult !== null}
-              Tagging works
-            {:else}
-              Tagging failed
-            {/if}
-          </span>
-          {#if ollamaStatus.model_installed}
-            <button class="status-action" type="button" disabled={taggingLoading || modelDirty} onclick={handleTestTagging} title={modelDirty ? "Save settings first" : ""}>
-              {#if taggingLoading}
-                <span class="spinner"></span> Testing...
-              {:else}
-                Test
-              {/if}
-            </button>
-          {/if}
-        </div>
-        {#if modelDirty}
-          <div class="status-hint fail">
-            Model changed — save settings first, then test.
-          </div>
-        {:else if taggingLoading}
-          <div class="status-hint">
-            Sending test request... This can take up to 60 seconds on first run while the model loads into memory.
-          </div>
-        {:else if taggingResult !== undefined && taggingResult !== null}
-          <div class="status-hint ok">
-            Test result: {taggingResult.join(", ")}
-          </div>
-        {:else if taggingResult === null}
-          <div class="status-hint fail">
-            The model did not return tags. Try a different model or check Ollama logs.
-          </div>
-        {:else if ollamaStatus.model_installed}
-          <div class="status-hint">
-            Click "Test" to verify that the model can tag clipboard content.
-          </div>
-        {/if}
-      </div>
-
-      <button class="settings-ghost-btn refresh-btn" type="button" disabled={ollamaLoading} onclick={refreshOllamaStatus}>
-        Check again
-      </button>
-    {/if}
-  </section>
-
-  <section class="settings-section">
-    <div class="settings-section-title">AI Model</div>
-    <label class="settings-field">
-      <span class="settings-label">Ollama model</span>
-      <select
-        class="settings-select"
-        bind:value={selectedModelPreset}
-        onchange={(e) => handleModelPresetChange((e.currentTarget as HTMLSelectElement).value)}
-      >
-        {#each modelCatalog.options as option}
-          <option value={option.value}>
-            {option.label} · ~{option.memory_gb.toFixed(1)} GB · {option.fits ? "fits" : "tight"}{option.installed ? " · installed" : ""}
-          </option>
-        {/each}
-        <option value="__custom__">Custom model</option>
-      </select>
-      {#if selectedModelPreset === "__custom__"}
-        <input
-          class="settings-input"
-          type="text"
-          bind:value={settings.ollama_model}
-          placeholder="qwen3:4b-instruct-2507-q4_K_M"
-        />
-      {/if}
-      <div class="settings-info-card">
-        <div class="settings-hint">
-          Machine RAM: {modelCatalog.total_memory_gb.toFixed(1)} GB
-        </div>
-        <div class="settings-hint">
-          Recommended Ollama budget: {modelCatalog.recommended_memory_gb.toFixed(1)} GB
-        </div>
-        {#if selectedModelMeta}
-          <div class="settings-hint" class:fits={selectedModelMeta.fits} class:tight={!selectedModelMeta.fits}>
-            {selectedModelMeta.label} needs about {selectedModelMeta.memory_gb.toFixed(1)} GB and
-            {selectedModelMeta.fits ? " should fit this machine." : " may be too heavy for this machine."}
-          </div>
-        {/if}
-      </div>
-    </label>
-  </section>
-  {/if}
-
-  {#if activeTab === "privacy"}
-  <section class="settings-section">
-    <div class="settings-section-title">Privacy</div>
-    <div class="settings-field">
-      <span class="settings-label">Excluded apps</span>
-      <div class="settings-inline">
-        <input
-          class="settings-input"
-          type="text"
-          bind:value={excludedAppInput}
-          placeholder="App name, for example Telegram"
-        />
-        <button class="settings-small-btn" type="button" onclick={handleAddExcludedApp}>
-          Add
-        </button>
-      </div>
-      <button class="settings-ghost-btn" type="button" onclick={handleAddFrontmostApp}>
-        Exclude current app
-      </button>
-      {#if excludedApps.length > 0}
-        <div class="excluded-apps">
-          {#each excludedApps as app}
-            <div class="excluded-app-row">
-              <span class="excluded-app-name">{app.bundle_id}</span>
-              <button
-                class="excluded-remove-btn"
-                type="button"
-                onclick={() => handleRemoveExcludedApp(app.id)}
-              >
-                Remove
-              </button>
-            </div>
-          {/each}
-        </div>
-      {:else}
-        <div class="settings-hint">Clipboard from excluded apps will not be stored or tagged.</div>
-      {/if}
-    </div>
-  </section>
-  {/if}
-
-  <div class="settings-actions">
-    <button class="settings-save-btn" type="button" disabled={savingSettings} onclick={saveSettings}>
-      {savingSettings ? "Saving..." : "Save settings"}
-    </button>
-    {#if settingsNotice}
-      <div class="settings-note">{settingsNotice}</div>
+      {/each}
     {/if}
   </div>
 </div>
@@ -609,531 +302,201 @@
   :global(body) {
     margin: 0;
     padding: 0;
-    background: rgba(30, 30, 36, 0.96);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-    color: #e0e0e0;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    font-size: var(--text-md);
+    color: var(--fg-primary);
+    overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   :global(*) {
     box-sizing: border-box;
+    outline: none;
   }
 
-  .settings-page {
-    padding: 36px 24px 24px;
-    max-width: 540px;
-    margin: 0 auto;
+  :global(::selection) {
+    background: transparent;
   }
 
-  .restart-banner {
+  .app {
+    width: 100vw;
+    height: 100vh;
+    background:
+      linear-gradient(180deg, rgba(36, 36, 42, 0.94), rgba(20, 20, 26, 0.90));
+    backdrop-filter: blur(34px) saturate(1.15);
+    -webkit-backdrop-filter: blur(34px) saturate(1.15);
+    border-radius: 18px;
+    border: 1px solid var(--border-strong);
+    box-shadow:
+      0 18px 50px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: translateY(26px) scale(0.985);
+    opacity: 0;
+    transition:
+      transform 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 0.22s ease;
+  }
+
+  .app.visible {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+
+  .header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-    padding: 10px 12px;
-    background: linear-gradient(180deg, rgba(255, 184, 79, 0.16), rgba(255, 144, 50, 0.10));
-    border: 1px solid rgba(255, 184, 79, 0.32);
-    border-radius: 11px;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
   }
 
-  .restart-banner-text {
-    flex: 1;
-    font-size: 12px;
-    color: #f6d8a8;
-    line-height: 1.4;
-  }
-
-  .restart-banner-btn {
-    padding: 7px 14px;
-    background: rgba(255, 184, 79, 0.22);
-    border: 1px solid rgba(255, 184, 79, 0.38);
-    border-radius: 9px;
-    color: #fff1d8;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.15s ease, transform 0.15s ease;
-  }
-
-  .restart-banner-btn:hover {
-    background: rgba(255, 184, 79, 0.32);
-    transform: translateY(-1px);
-  }
-
-  .settings-tabs {
+  .tag-groups {
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 14px;
-    padding: 4px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) 0;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
 
-  .settings-tab {
-    flex: 1 1 auto;
-    min-width: 70px;
-    padding: 7px 10px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    color: #b8bdcc;
-    font: inherit;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-  }
+  .tag-groups::-webkit-scrollbar { display: none; }
 
-  .settings-tab:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: #edf1f8;
-  }
-
-  .settings-tab.active {
-    background: rgba(94, 140, 255, 0.18);
-    border-color: rgba(120, 160, 255, 0.28);
-    color: #eef3ff;
-  }
-
-  .settings-toggle {
+  .tag-group-chip {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 6px;
+    gap: var(--space-2);
+    padding: 5px var(--space-3);
+    border-radius: 999px;
+    border: 1px solid var(--border-subtle);
+    background: var(--surface-1);
+    color: var(--fg-secondary);
     cursor: pointer;
-    user-select: none;
-  }
-
-  .settings-toggle input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    accent-color: #6791ff;
-    cursor: pointer;
-  }
-
-  .settings-toggle-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: #edf1f8;
-  }
-
-
-  .settings-section {
-    padding: 14px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 14px;
-  }
-
-  .settings-section + .settings-section {
-    margin-top: 10px;
-  }
-
-  .settings-section-title {
-    margin-bottom: 10px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #8f97aa;
-  }
-
-  .settings-field {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .settings-inline {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .settings-label {
-    font-size: 12px;
-    font-weight: 600;
-    color: #c6cada;
-  }
-
-  .settings-input,
-  .settings-select {
-    width: 100%;
-    min-height: 42px;
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.11);
-    border-radius: 11px;
-    color: #edf1f8;
-    font: inherit;
-    outline: none;
-    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
-  }
-
-  .settings-select {
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    padding-right: 42px;
-    background-image:
-      linear-gradient(45deg, transparent 50%, rgba(237, 241, 248, 0.9) 50%),
-      linear-gradient(135deg, rgba(237, 241, 248, 0.9) 50%, transparent 50%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
-    background-position:
-      calc(100% - 18px) calc(50% - 2px),
-      calc(100% - 12px) calc(50% - 2px),
-      0 0;
-    background-size:
-      6px 6px,
-      6px 6px,
-      100% 100%;
-    background-repeat: no-repeat;
-    cursor: pointer;
-  }
-
-  .settings-select:hover {
-    background-color: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.16);
-  }
-
-  .settings-select option {
-    color: #edf1f8;
-    background: #23252c;
-  }
-
-  .settings-input:focus,
-  .settings-select:focus {
-    border-color: rgba(120, 160, 255, 0.4);
-    box-shadow: 0 0 0 3px rgba(94, 140, 255, 0.15);
-    background: rgba(255, 255, 255, 0.08);
-  }
-
-  .settings-input::placeholder {
-    color: rgba(237, 240, 248, 0.35);
-  }
-
-  .settings-info-card {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 10px 11px;
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 11px;
-  }
-
-  .settings-hint {
-    font-size: 11px;
-    line-height: 1.35;
-    color: #97a0b4;
-  }
-
-  .settings-hint.fits {
-    color: #8fd1a1;
-  }
-
-  .settings-hint.tight {
-    color: #e3b370;
-  }
-
-  .settings-small-btn,
-  .settings-ghost-btn {
-    min-height: 40px;
-    border-radius: 11px;
-    font: inherit;
-    cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
-  }
-
-  .settings-small-btn {
-    padding: 0 14px;
-    background: rgba(96, 134, 230, 0.16);
-    border: 1px solid rgba(120, 160, 255, 0.22);
-    color: #edf1f8;
     white-space: nowrap;
-  }
-
-  .settings-small-btn:hover,
-  .settings-ghost-btn:hover {
-    transform: translateY(-1px);
-  }
-
-  .settings-ghost-btn {
-    padding: 0 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: #d8dce6;
-    width: fit-content;
-  }
-
-  .settings-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-top: 14px;
-  }
-
-  .settings-save-btn {
-    min-height: 42px;
-    padding: 0 16px;
-    background: linear-gradient(180deg, rgba(103, 145, 255, 0.95), rgba(75, 121, 244, 0.92));
-    border: 1px solid rgba(144, 177, 255, 0.35);
-    border-radius: 12px;
-    color: #f7f9ff;
     font: inherit;
-    font-weight: 700;
-    cursor: pointer;
-    transition: transform 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
-  }
-
-  .settings-save-btn:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.04);
-  }
-
-  .settings-save-btn:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  .settings-note {
-    padding: 0 2px;
-    font-size: 11px;
-    color: #91d6a6;
-  }
-
-  .excluded-apps {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 160px;
-    overflow-y: auto;
-    padding-right: 2px;
-  }
-
-  .excluded-app-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 9px 10px;
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-  }
-
-  .excluded-app-name {
-    font-size: 12px;
-    color: #e7ebf3;
-    min-width: 0;
-    word-break: break-word;
-  }
-
-  .excluded-remove-btn {
-    border: none;
-    background: transparent;
-    color: #e3b370;
-    cursor: pointer;
-    font: inherit;
-    font-size: 11px;
-    padding: 0;
-    white-space: nowrap;
-  }
-
-  .settings-item {
-    width: 100%;
-    min-height: 40px;
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    color: #dfe3ec;
-    text-align: left;
-    cursor: pointer;
-    font: inherit;
+    font-size: var(--text-xs);
+    font-weight: 500;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   }
 
-  .settings-item:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.1);
+  .tag-group-chip:hover {
+    background: var(--surface-2);
+    color: var(--fg-primary);
   }
 
-  .settings-item.danger {
-    color: #f0c8c8;
+  .tag-group-chip.active {
+    background: var(--accent-bg-strong);
+    border-color: var(--accent-border);
+    color: var(--fg-primary);
   }
 
-  .settings-item.danger:hover {
-    background: rgba(255, 107, 107, 0.08);
-    border-color: rgba(255, 107, 107, 0.14);
+  .tag-group-count {
+    display: inline-flex;
+    min-width: 16px;
+    justify-content: center;
+    padding: 1px 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--fg-secondary);
   }
 
-  .status-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 0;
-  }
-
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+  .header-actions {
+    position: relative;
+    margin-left: auto;
     flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.15);
   }
 
-  .status-dot.ok {
-    background: #4ade80;
-    box-shadow: 0 0 6px rgba(74, 222, 128, 0.4);
-  }
-
-  .status-dot.fail {
-    background: #f87171;
-    box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
-  }
-
-  .status-dot.checking {
-    background: #fbbf24;
-    animation: pulse 1s infinite;
-  }
-
-  .status-dot.disabled {
-    background: rgba(255, 255, 255, 0.08);
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
-
-  .status-text {
-    flex: 1;
-    font-size: 12px;
-    color: #d8dce6;
-  }
-
-  .status-text.dimmed {
-    color: #6b7280;
-  }
-
-  .status-action {
-    padding: 4px 12px;
-    min-height: 28px;
-    border-radius: 8px;
-    background: rgba(96, 134, 230, 0.16);
-    border: 1px solid rgba(120, 160, 255, 0.22);
-    color: #c4d4ff;
-    font: inherit;
-    font-size: 11px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.15s ease, transform 0.15s ease;
-  }
-
-  .status-action:hover:not(:disabled) {
-    background: rgba(96, 134, 230, 0.28);
-    transform: translateY(-1px);
-  }
-
-  .status-action:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  .refresh-btn {
-    margin-top: 8px;
-    min-height: 32px;
-    font-size: 12px;
-  }
-
-  .status-step {
-    padding: 6px 0;
-  }
-
-  .status-step + .status-step {
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
-  }
-
-  .status-hint {
-    margin: 6px 0 2px 18px;
-    font-size: 11px;
-    line-height: 1.5;
-    color: #8a90a0;
-  }
-
-  .status-hint.ok {
-    color: #6ecf8a;
-  }
-
-  .status-hint.fail {
-    color: #f0a0a0;
-  }
-
-  .status-hint code {
-    padding: 1px 5px;
-    background: rgba(255, 255, 255, 0.07);
-    border-radius: 4px;
-    font-family: "SF Mono", Menlo, monospace;
-    font-size: 10.5px;
-    color: #c8cee0;
-  }
-
-  kbd {
-    display: inline-block;
-    padding: 1px 6px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 5px;
-    font-family: "SF Mono", Menlo, monospace;
-    font-size: 11px;
-    color: #c8cee0;
-  }
-
-  .link-btn {
-    background: none;
-    border: none;
-    padding: 0;
-    color: #7da4ff;
-    cursor: pointer;
-    font: inherit;
-    font-size: 11px;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  .link-btn:hover {
-    color: #a8c4ff;
-  }
-
-  .spinner {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    border-top-color: #c4d4ff;
-    border-radius: 50%;
-    animation: spin 0.6s linear infinite;
-    vertical-align: middle;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .pull-progress {
-    display: flex;
+  .settings-btn {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    color: #c4d4ff;
-    font-family: "SF Mono", Menlo, monospace;
-    font-size: 10.5px;
-    word-break: break-all;
+    justify-content: center;
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--fg-secondary);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+
+  .settings-btn:hover {
+    background: var(--surface-3);
+    color: var(--fg-primary);
+  }
+
+  .settings-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+
+  .grid-container {
+    flex: 1;
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4) var(--space-4);
+    overflow-x: auto;
+    overflow-y: hidden;
+    align-items: flex-start;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+
+  .grid-container::-webkit-scrollbar {
+    height: 6px;
+  }
+
+  .grid-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .grid-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
+
+  .card-wrapper {
+    animation: card-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  @keyframes card-enter {
+    from {
+      opacity: 0;
+      transform: translateY(20px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .empty-state {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--fg-muted);
+    font-size: var(--text-sm);
+  }
+
+  .empty-state p {
+    margin: var(--space-1) 0;
+  }
+
+  .hint {
+    font-size: var(--text-xs);
+    color: var(--fg-disabled);
   }
 </style>

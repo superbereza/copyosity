@@ -303,11 +303,14 @@
     margin: 0;
     padding: 0;
     background: transparent;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    font-size: var(--text-md);
+    color: var(--fg-primary);
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   :global(*) {
@@ -323,11 +326,11 @@
     width: 100vw;
     height: 100vh;
     background:
-      linear-gradient(180deg, rgba(44, 44, 50, 0.68), rgba(24, 24, 30, 0.58));
+      linear-gradient(180deg, rgba(36, 36, 42, 0.94), rgba(20, 20, 26, 0.90));
     backdrop-filter: blur(34px) saturate(1.15);
     -webkit-backdrop-filter: blur(34px) saturate(1.15);
     border-radius: 18px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    border: 1px solid var(--border-strong);
     box-shadow:
       0 18px 50px rgba(0, 0, 0, 0.28),
       inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -338,8 +341,7 @@
     opacity: 0;
     transition:
       transform 0.24s cubic-bezier(0.22, 1, 0.36, 1),
-      opacity 0.22s ease,
-      box-shadow 0.24s ease;
+      opacity 0.22s ease;
   }
 
   .app.visible {
@@ -350,61 +352,61 @@
   .header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    background: rgba(255, 255, 255, 0.015);
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
   }
 
   .tag-groups {
     display: flex;
-    gap: 8px;
-    padding: 10px 16px 0;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) 0;
     overflow-x: auto;
     scrollbar-width: none;
   }
 
-  .tag-groups::-webkit-scrollbar {
-    display: none;
-  }
+  .tag-groups::-webkit-scrollbar { display: none; }
 
   .tag-group-chip {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    padding: 7px 11px;
+    gap: var(--space-2);
+    padding: 5px var(--space-3);
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.035);
-    color: #c9ccd8;
+    border: 1px solid var(--border-subtle);
+    background: var(--surface-1);
+    color: var(--fg-secondary);
     cursor: pointer;
     white-space: nowrap;
     font: inherit;
-    font-size: 11px;
+    font-size: var(--text-xs);
+    font-weight: 500;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   }
 
   .tag-group-chip:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.12);
+    background: var(--surface-2);
+    color: var(--fg-primary);
   }
 
   .tag-group-chip.active {
-    background: rgba(94, 140, 255, 0.18);
-    border-color: rgba(120, 160, 255, 0.28);
-    color: #eef3ff;
+    background: var(--accent-bg-strong);
+    border-color: var(--accent-border);
+    color: var(--fg-primary);
   }
 
   .tag-group-count {
     display: inline-flex;
-    min-width: 18px;
+    min-width: 16px;
     justify-content: center;
-    padding: 2px 5px;
+    padding: 1px 4px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.08);
     font-size: 10px;
-    line-height: 1;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--fg-secondary);
   }
 
   .header-actions {
@@ -414,36 +416,35 @@
   }
 
   .settings-btn {
-    width: 36px;
-    height: 36px;
+    width: 30px;
+    height: 30px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    color: #d8d8d8;
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--fg-secondary);
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+    transition: background 0.15s ease, color 0.15s ease;
   }
 
   .settings-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.16);
-    transform: translateY(-1px);
+    background: var(--surface-3);
+    color: var(--fg-primary);
   }
 
   .settings-btn svg {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     fill: currentColor;
   }
 
   .grid-container {
     flex: 1;
     display: flex;
-    gap: 12px;
-    padding: 14px 16px 16px;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4) var(--space-4);
     overflow-x: auto;
     overflow-y: hidden;
     align-items: flex-start;
@@ -486,15 +487,16 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: #666;
+    color: var(--fg-muted);
+    font-size: var(--text-sm);
   }
 
   .empty-state p {
-    margin: 4px 0;
+    margin: var(--space-1) 0;
   }
 
   .hint {
-    font-size: 13px;
-    color: #555;
+    font-size: var(--text-xs);
+    color: var(--fg-disabled);
   }
 </style>

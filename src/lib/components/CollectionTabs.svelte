@@ -86,46 +86,44 @@
   .tabs-container {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
     overflow-x: auto;
-    padding: 0 4px;
+    padding: 0 var(--space-1);
     scrollbar-width: none;
   }
 
-  .tabs-container::-webkit-scrollbar {
-    display: none;
-  }
+  .tabs-container::-webkit-scrollbar { display: none; }
 
   .tab {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    border-radius: 6px;
+    gap: 5px;
+    padding: 5px var(--space-3);
+    border-radius: var(--radius-sm);
     background: none;
     border: none;
-    color: #999;
-    font-size: 12px;
+    color: var(--fg-muted);
+    font-size: var(--text-sm);
     font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
     font-family: inherit;
-    transition: all 0.15s;
+    transition: background 0.15s ease, color 0.15s ease;
   }
 
   .tab:hover {
-    color: #ddd;
-    background: rgba(255, 255, 255, 0.06);
+    color: var(--fg-primary);
+    background: var(--surface-2);
   }
 
   .tab.active {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.1);
+    color: var(--fg-primary);
+    background: var(--surface-3);
   }
 
   .tab-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     flex-shrink: 0;
   }
@@ -133,37 +131,37 @@
   .tab-delete {
     background: none;
     border: none;
-    color: #666;
+    color: var(--fg-disabled);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--text-md);
     padding: 0 2px;
     line-height: 1;
     opacity: 0;
-    transition: opacity 0.15s;
+    transition: opacity 0.15s, color 0.15s;
   }
 
-  .tab:hover .tab-delete {
-    opacity: 1;
-  }
-
-  .tab-delete:hover {
-    color: #ff6b6b;
-  }
+  .tab:hover .tab-delete { opacity: 1; }
+  .tab-delete:hover { color: var(--danger); }
 
   .add-tab {
-    font-size: 16px;
-    color: #666;
+    font-size: var(--text-md);
+    color: var(--fg-muted);
   }
 
   .add-form input {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 6px;
-    color: #e0e0e0;
-    padding: 4px 10px;
-    font-size: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    padding: 4px var(--space-2);
+    font-size: var(--text-sm);
     outline: none;
     width: 120px;
     font-family: inherit;
+  }
+
+  .add-form input:focus {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 0 3px var(--accent-bg);
   }
 </style>

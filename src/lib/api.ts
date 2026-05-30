@@ -79,6 +79,18 @@ export async function restartAppWithSettingsOpen(): Promise<void> {
   return invoke("restart_app_with_settings_open");
 }
 
+export interface UpdateCheckResult {
+  current: string;
+  latest: string;
+  has_update: boolean;
+  release_url: string;
+  notes: string;
+}
+
+export async function checkForUpdate(): Promise<UpdateCheckResult> {
+  return invoke("check_for_update");
+}
+
 export async function getModelCatalog(): Promise<ModelCatalog> {
   return invoke("get_model_catalog");
 }

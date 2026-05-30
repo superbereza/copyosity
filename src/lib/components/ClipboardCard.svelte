@@ -224,13 +224,13 @@
     min-width: 220px;
     height: 280px;
     background: linear-gradient(180deg, rgba(58, 58, 66, 0.92), rgba(36, 36, 44, 0.88));
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 14px;
-    padding: 12px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    padding: var(--space-3);
     cursor: pointer;
     display: flex;
     flex-direction: column;
-    transition: all 0.15s ease;
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
     font-family: inherit;
     color: inherit;
     text-align: left;
@@ -239,51 +239,49 @@
   }
 
   .card:hover {
-    border-color: rgba(120, 160, 255, 0.45);
+    border-color: var(--accent-border);
     background: linear-gradient(180deg, rgba(66, 66, 76, 0.96), rgba(42, 42, 50, 0.92));
     transform: translateY(-2px);
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
   }
 
   .card.selected {
-    border-color: rgba(100, 140, 255, 0.7);
-    box-shadow: 0 0 0 2px rgba(100, 140, 255, 0.3);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-bg);
   }
 
-  .card.pinned {
-    border-color: rgba(255, 200, 50, 0.3);
-  }
+  .card.pinned { border-color: rgba(217, 165, 90, 0.4); }
 
   .card-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
     flex-shrink: 0;
   }
 
   .card-type {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
   }
 
   .type-label {
     display: inline-flex;
     align-items: center;
     width: fit-content;
-    padding: 3px 8px;
+    padding: 2px var(--space-2);
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.07);
-    font-weight: 600;
-    font-size: 12px;
+    background: var(--surface-2);
+    font-weight: 500;
+    font-size: var(--text-xs);
     letter-spacing: 0.02em;
-    color: #e0e0e0;
+    color: var(--fg-primary);
   }
 
   .time {
-    font-size: 11px;
-    color: #888;
+    font-size: var(--text-xs);
+    color: var(--fg-muted);
   }
 
   .card-actions {
@@ -293,44 +291,41 @@
     transition: opacity 0.15s;
   }
 
-  .card:hover .card-actions {
-    opacity: 1;
-  }
+  .card:hover .card-actions { opacity: 1; }
 
   .action-btn {
     background: none;
     border: none;
-    color: #888;
+    color: var(--fg-muted);
     cursor: pointer;
-    font-size: 16px;
-    padding: 2px 4px;
-    border-radius: 4px;
+    font-size: var(--text-md);
+    padding: 2px var(--space-1);
+    border-radius: var(--radius-sm);
     line-height: 1;
+    transition: background 0.15s ease, color 0.15s ease;
   }
 
   .action-btn:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.1);
+    color: var(--fg-primary);
+    background: var(--surface-2);
   }
 
-  .action-btn.delete:hover {
-    color: #ff6b6b;
-  }
+  .action-btn.delete:hover { color: var(--danger); }
 
   .card-body {
     flex: 1;
     overflow: hidden;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
   }
 
   .text-preview {
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    font-size: 12px;
-    line-height: 1.55;
-    color: #f0f0f2;
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    line-height: var(--leading-body);
+    color: var(--fg-primary);
     white-space: pre-wrap;
     word-break: break-word;
     margin: 0;
@@ -342,59 +337,59 @@
   .image-preview {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-2);
   }
 
   .image-preview img {
     width: 100%;
     height: 86px;
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     object-fit: cover;
     display: block;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-subtle);
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
   }
 
   .image-placeholder {
     width: 100%;
     height: 86px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #666;
-    font-size: 13px;
+    color: var(--fg-muted);
+    font-size: var(--text-sm);
   }
 
   .image-meta {
-    padding: 7px 10px;
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    color: #d8d8dd;
-    font-size: 11px;
-    line-height: 1.45;
+    padding: 6px var(--space-2);
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--fg-secondary);
+    font-size: var(--text-xs);
+    line-height: var(--leading-body);
   }
 
   .card-footer {
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    gap: 8px;
+    gap: var(--space-2);
     flex-shrink: 0;
   }
 
   .footer-meta {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     min-width: 0;
   }
 
   .source-app {
-    font-size: 11px;
-    color: #666;
+    font-size: var(--text-xs);
+    color: var(--fg-muted);
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -403,31 +398,32 @@
 
   .tags {
     display: flex;
-    gap: 6px;
+    gap: 4px;
     flex-wrap: wrap;
   }
 
   .tag-chip {
     display: inline-flex;
     align-items: center;
-    padding: 3px 7px;
+    padding: 2px 6px;
     border-radius: 999px;
-    background: rgba(90, 138, 255, 0.14);
-    border: 1px solid rgba(120, 160, 255, 0.18);
-    color: #cdddff;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+    color: var(--fg-primary);
     font-size: 10px;
-    line-height: 1;
+    font-weight: 500;
+    line-height: 1.3;
     text-transform: lowercase;
   }
 
   .char-count {
-    font-size: 11px;
-    color: #555;
+    font-size: var(--text-xs);
+    color: var(--fg-disabled);
   }
 
   .card.copied {
-    border-color: rgba(74, 222, 128, 0.5);
-    box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.2);
+    border-color: var(--success);
+    box-shadow: 0 0 0 2px var(--success-bg);
   }
 
   .copied-overlay {
@@ -437,21 +433,21 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: var(--space-2);
     background: rgba(20, 20, 26, 0.88);
     backdrop-filter: blur(6px);
-    border-radius: 14px;
-    color: #4ade80;
-    font-size: 15px;
-    font-weight: 700;
+    border-radius: var(--radius-xl);
+    color: var(--success);
+    font-size: var(--text-lg);
+    font-weight: 600;
     letter-spacing: 0.02em;
     animation: copied-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     z-index: 5;
   }
 
   .copied-icon {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     animation: check-draw 0.35s ease forwards;
   }
 

@@ -1,4 +1,69 @@
 use crate::db::{AppSettings, AppSettingsUpdate, ClickAction, ClipboardEntry, Collection, Database, ExcludedApp, ModelCatalog};
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize)]
+pub struct UpdateCheckResult {
+    pub current: String,
+    pub latest: String,
+    pub has_update: bool,
+    pub release_url: String,
+    pub notes: String,
+}
+
+#[derive(Deserialize)]
+struct GhRelease {
+    tag_name: String,
+    html_url: String,
+    body: Option<String>,
+}
+
+fn parse_semver(input: &str) -> Option<(u32, u32, u32)> {
+    let mut s = input.trim();
+    if let Some(stripped) = s.strip_prefix('v').or_else(|| s.strip_prefix('V')) {
+        s = stripped;
+    }
+    // Drop prerelease / build metadata for comparison
+    let core = s.split(['-', '+']).next()?;
+    let mut parts = core.splitn(3, '.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    let patch: u32 = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
+}
+
+#[tauri::command]
+pub fn check_for_update() -> Result<UpdateCheckResult, String> {
+    let url = "https://api.github.com/repos/superbereza/copyosity/releases/latest";
+    let resp = ureq::get(url)
+        .set("Accept", "application/vnd.github+json")
+        .set("User-Agent", "Copyosity-Updater")
+        .timeout(std::time::Duration::from_secs(8))
+        .call()
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    let release: GhRelease = resp
+        .into_json()
+        .map_err(|e| format!("Failed to parse GitHub response: {}", e))?;
+
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let latest_clean = release
+        .tag_name
+        .trim_start_matches(|c| c == 'v' || c == 'V')
+        .to_string();
+
+    let has_update = match (parse_semver(&current), parse_semver(&latest_clean)) {
+        (Some(c), Some(l)) => l > c,
+        _ => false,
+    };
+
+    Ok(UpdateCheckResult {
+        current,
+        latest: latest_clean,
+        has_update,
+        release_url: release.html_url,
+        notes: release.body.unwrap_or_default(),
+    })
+}
 
 #[cfg(target_os = "macos")]
 fn simulate_paste() {
@@ -130,8 +195,8 @@ pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
         "settings",
         tauri::WebviewUrl::App("/settings".into()),
     )
-    .title("Copyosity Settings")
-    .inner_size(580.0, 680.0)
+    .title("")
+    .inner_size(560.0, 720.0)
     .resizable(false)
     .center();
 

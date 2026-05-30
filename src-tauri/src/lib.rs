@@ -189,12 +189,21 @@ pub fn run() {
 
             let tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
+                .icon_as_template(true)
                 .tooltip("Copyosity")
                 .menu(&build_tray_menu(app)?)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "open" => toggle_window(app.app_handle()),
                     "settings" => {
                         let _ = commands::open_settings_window(app.app_handle().clone());
+                    }
+                    "check_updates" => {
+                        let handle = app.app_handle().clone();
+                        let _ = commands::open_settings_window(handle.clone());
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                            let _ = handle.emit("trigger-update-check", ());
+                        });
                     }
                     "quit" => {
                         let _ = commands::quit_app(app.app_handle().clone());
@@ -320,6 +329,7 @@ pub fn run() {
             commands::test_ollama_tagging,
             commands::rebind_main_shortcut,
             commands::restart_app_with_settings_open,
+            commands::check_for_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
