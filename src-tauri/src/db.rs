@@ -82,6 +82,9 @@ pub struct ClipboardEntry {
     pub collection_id: Option<i64>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Text recognized from an image via on-device OCR (Vision). None for text entries.
+    #[serde(default)]
+    pub ocr_text: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -133,7 +136,8 @@ impl Database {
                 char_count INTEGER,
                 created_at TEXT NOT NULL,
                 is_pinned INTEGER DEFAULT 0,
-                collection_id INTEGER REFERENCES collections(id) ON DELETE SET NULL
+                collection_id INTEGER REFERENCES collections(id) ON DELETE SET NULL,
+                ocr_text TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_entries_created_at ON clipboard_entries(created_at DESC);
@@ -166,7 +170,24 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_clipboard_tag_state_status ON clipboard_tag_state(status);
         ")?;
 
+        Self::run_migrations(&conn)?;
+
         Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    /// Versioned schema migrations via PRAGMA user_version.
+    fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+
+        // v1: add ocr_text to clipboard_entries for databases created before it
+        // existed in the CREATE TABLE above. New DBs already have the column, so
+        // the ALTER fails with a duplicate-column error which we intentionally ignore.
+        if version < 1 {
+            let _ = conn.execute("ALTER TABLE clipboard_entries ADD COLUMN ocr_text TEXT", []);
+            conn.execute_batch("PRAGMA user_version = 1;")?;
+        }
+
+        Ok(())
     }
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
@@ -321,7 +342,8 @@ impl Database {
 
         let mut sql = String::from(
             "SELECT id, content_type, text_content, NULL as image_data, COALESCE(image_thumb, image_data) as image_thumb, source_app, NULL as source_app_icon, content_hash, char_count, created_at, is_pinned, collection_id,
-             COALESCE((SELECT GROUP_CONCAT(tag, '|') FROM clipboard_tags WHERE entry_id = clipboard_entries.id), '') as tags
+             COALESCE((SELECT GROUP_CONCAT(tag, '|') FROM clipboard_tags WHERE entry_id = clipboard_entries.id), '') as tags,
+             ocr_text
              FROM clipboard_entries WHERE 1=1"
         );
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -336,11 +358,15 @@ impl Database {
         }
 
         if let Some(q) = search {
-            sql.push_str(" AND text_content LIKE ?");
-            param_values.push(Box::new(format!("%{}%", q)));
+            sql.push_str(" AND (text_content LIKE ? OR ocr_text LIKE ?)");
+            let pattern = format!("%{}%", q);
+            param_values.push(Box::new(pattern.clone()));
+            param_values.push(Box::new(pattern));
         }
 
-        sql.push_str(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+        // id DESC as a stable tie-breaker so LIMIT/OFFSET pages don't
+        // duplicate or skip rows when created_at collides.
+        sql.push_str(" ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?");
         param_values.push(Box::new(limit));
         param_values.push(Box::new(offset));
 
@@ -367,6 +393,7 @@ impl Database {
                     .filter(|tag| !tag.is_empty())
                     .map(|tag| tag.to_string())
                     .collect(),
+                ocr_text: row.get(13)?,
             })
         })?.collect::<Result<Vec<_>, _>>()?;
 
@@ -602,7 +629,8 @@ impl Database {
         conn.query_row(
             "SELECT id, content_type, text_content, image_data, image_thumb, source_app, source_app_icon,
                     content_hash, char_count, created_at, is_pinned, collection_id,
-                    COALESCE((SELECT GROUP_CONCAT(tag, '|') FROM clipboard_tags WHERE entry_id = clipboard_entries.id), '') as tags
+                    COALESCE((SELECT GROUP_CONCAT(tag, '|') FROM clipboard_tags WHERE entry_id = clipboard_entries.id), '') as tags,
+                    ocr_text
              FROM clipboard_entries
              WHERE id = ?1",
             params![entry_id],
@@ -626,6 +654,7 @@ impl Database {
                         .filter(|tag| !tag.is_empty())
                         .map(|tag| tag.to_string())
                         .collect(),
+                    ocr_text: row.get(13)?,
                 })
             },
         )
@@ -634,6 +663,16 @@ impl Database {
             rusqlite::Error::QueryReturnedNoRows => Ok(None),
             _ => Err(err),
         })
+    }
+
+    /// Store OCR-recognized text for an image entry.
+    pub fn set_ocr_text(&self, entry_id: i64, text: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE clipboard_entries SET ocr_text = ?1 WHERE id = ?2",
+            params![text, entry_id],
+        )?;
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -716,6 +755,7 @@ mod tests {
             is_pinned: false,
             collection_id: None,
             tags: Vec::new(),
+            ocr_text: None,
         }
     }
 

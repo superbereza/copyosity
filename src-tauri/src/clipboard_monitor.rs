@@ -38,7 +38,17 @@ pub fn start_clipboard_monitor(app: AppHandle) {
 
     // Run clipboard polling in a dedicated thread (not async — arboard is sync)
     std::thread::spawn(move || {
-        let mut clipboard = Clipboard::new().expect("Failed to access clipboard");
+        // Don't panic the whole monitor if the clipboard is momentarily
+        // unavailable at startup — retry with backoff until it's ready.
+        let mut clipboard = loop {
+            match Clipboard::new() {
+                Ok(cb) => break cb,
+                Err(e) => {
+                    eprintln!("[clipboard] init failed, retrying in 1s: {}", e);
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                }
+            }
+        };
         let mut last_hash = String::new();
 
         loop {
@@ -82,6 +92,7 @@ pub fn start_clipboard_monitor(app: AppHandle) {
                     is_pinned: false,
                     collection_id: None,
                     tags: Vec::new(),
+                    ocr_text: None,
                 };
 
                 if let Ok((id, is_new)) = db.insert_entry(&entry) {
@@ -132,6 +143,8 @@ pub fn start_clipboard_monitor(app: AppHandle) {
                 else {
                     continue;
                 };
+                // Keep a copy of the PNG (base64) to OCR after insertion.
+                let png_b64_for_ocr = image_full_b64.clone();
 
                 let entry = ClipboardEntry {
                     id: 0,
@@ -147,25 +160,54 @@ pub fn start_clipboard_monitor(app: AppHandle) {
                     is_pinned: false,
                     collection_id: None,
                     tags: Vec::new(),
+                    ocr_text: None,
                 };
 
-                if let Ok((id, _is_new)) = db.insert_entry(&entry) {
+                if let Ok((id, is_new)) = db.insert_entry(&entry) {
                     let mut saved = entry.clone();
                     saved.id = id;
                     saved.image_data = None;
                     let _ = app.emit("clipboard-changed", &saved);
+
+                    // OCR the image off-thread; store recognized text so the
+                    // image becomes searchable/taggable. Only for new entries.
+                    if is_new {
+                        let db = db.clone();
+                        let app = app.clone();
+                        std::thread::spawn(move || {
+                            let Ok(bytes) = base64::Engine::decode(
+                                &base64::engine::general_purpose::STANDARD,
+                                &png_b64_for_ocr,
+                            ) else {
+                                return;
+                            };
+                            if let Some(text) = crate::ocr::ocr_image_png(&bytes) {
+                                let text = text.trim().to_string();
+                                if !text.is_empty() {
+                                    if db.set_ocr_text(id, &text).is_ok() {
+                                        let _ = app.emit("entry-ocr", id);
+                                    }
+                                    if let Some(tags) = ollama::tag_text(&text) {
+                                        if db.set_entry_tags(id, &tags).is_ok() {
+                                            let _ = app.emit("entry-tagged", id);
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
                 }
             }
         }
     });
 }
 
-/// Fast hash — only hash first 4KB + length for speed on large content
+/// Content hash used for dedup. Hashes the full content so two different
+/// items that happen to share their first 4KB (and length) are not collapsed
+/// into one — the previous prefix-only hash silently dropped such entries.
 fn fast_hash(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    let prefix = if data.len() > 4096 { &data[..4096] } else { data };
-    hasher.update(prefix);
-    hasher.update(data.len().to_le_bytes());
+    hasher.update(data);
     hex::encode(hasher.finalize())
 }
 
