@@ -45,6 +45,8 @@
     invoke("set_main_banner_shown", { shown: pasteWillFail });
   });
 
+  let loadSeq = 0;
+
   async function loadBehaviorSettings() {
     try {
       const s = await getAppSettings();
@@ -64,11 +66,23 @@
   }
 
   async function loadEntries() {
-    entries = await getEntries({
-      collection_id: activeCollectionId,
-      pinned_only: pinnedOnly,
-      search: searchQuery || null,
-    });
+    // Guard against out-of-order responses: a slow earlier request must not
+    // overwrite the results of a newer search/filter.
+    const seq = ++loadSeq;
+    try {
+      const result = await getEntries({
+        collection_id: activeCollectionId,
+        pinned_only: pinnedOnly,
+        search: searchQuery || null,
+      });
+      if (seq === loadSeq) {
+        entries = result;
+      }
+    } catch (e) {
+      if (seq === loadSeq) {
+        console.error("Failed to load entries:", e);
+      }
+    }
   }
 
   async function loadCollections() {
