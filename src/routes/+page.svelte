@@ -10,6 +10,7 @@
     getAppSettings,
     hideMainWindow,
     openSettingsWindow,
+    checkAccessibility,
   } from "$lib/api";
   import ClipboardCard from "$lib/components/ClipboardCard.svelte";
   import SearchBar from "$lib/components/SearchBar.svelte";
@@ -27,7 +28,15 @@
   let revealCycle = $state(0);
   let singleClickAction = $state<ClickAction>("paste");
   let doubleClickAction = $state<ClickAction>("copy");
+  let accessibilityGranted = $state<boolean | null>(null);
   const hiddenTopTags = new Set(["code", "otp", "token", "log"]);
+
+  // Paste actions need Accessibility — without it activateEntry copies but
+  // simulate_paste silently no-ops, looking like a broken click.
+  let pasteWillFail = $derived(
+    accessibilityGranted === false &&
+      (singleClickAction === "paste" || doubleClickAction === "paste"),
+  );
 
   async function loadBehaviorSettings() {
     try {
@@ -36,6 +45,14 @@
       doubleClickAction = (s.double_click_action as ClickAction) ?? "copy";
     } catch (e) {
       console.error("Failed to load behavior settings", e);
+    }
+  }
+
+  async function refreshAccessibility() {
+    try {
+      accessibilityGranted = await checkAccessibility();
+    } catch (e) {
+      console.error("checkAccessibility failed", e);
     }
   }
 
@@ -87,6 +104,7 @@
     loadEntries();
     loadCollections();
     loadBehaviorSettings();
+    refreshAccessibility();
 
     // Tell Rust we're loaded — it will hide the off-screen warmup window
     invoke("frontend_ready");
@@ -104,6 +122,7 @@
     const unlistenShow = listen("window-show", () => {
       showWindow();
       loadBehaviorSettings();
+      refreshAccessibility();
     });
 
     const unlistenOpenSettings = listen("open-settings", () => {
@@ -214,6 +233,14 @@
 </script>
 
 <div class="app" class:visible>
+  {#if pasteWillFail}
+    <button class="a11y-banner" type="button" onclick={() => openSettingsWindow()}>
+      <span class="a11y-banner-dot"></span>
+      <span class="a11y-banner-text">
+        Paste won't work — Accessibility permission required. Click to fix.
+      </span>
+    </button>
+  {/if}
   <header class="header">
     <SearchBar value={searchQuery} onchange={debouncedSearch} />
     <CollectionTabs
@@ -357,6 +384,38 @@
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
   }
+
+  .a11y-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: 6px var(--space-4);
+    background: #2a2218;
+    border: none;
+    border-bottom: 1px solid #4a3a22;
+    color: #e8c47a;
+    font: inherit;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    flex-shrink: 0;
+    transition: background 0.15s ease;
+  }
+
+  .a11y-banner:hover { background: #322a1e; }
+  .a11y-banner:active { background: #221a12; }
+
+  .a11y-banner-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #d9a55a;
+    flex-shrink: 0;
+  }
+
+  .a11y-banner-text { flex: 1; }
 
   .tag-groups {
     display: flex;
