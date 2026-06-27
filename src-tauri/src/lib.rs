@@ -1,6 +1,7 @@
 mod clipboard_monitor;
 mod commands;
 mod db;
+mod ocr;
 mod ollama;
 
 use db::Database;
