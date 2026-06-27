@@ -502,3 +502,9 @@ pub fn restart_app_with_settings_open(
     }
 }
 
+#[tauri::command]
+pub fn set_main_banner_shown(app: tauri::AppHandle, shown: bool) -> Result<(), String> {
+    crate::set_banner_shown_internal(&app, shown);
+    Ok(())
+}
+

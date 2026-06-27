@@ -4,7 +4,7 @@ mod db;
 mod ollama;
 
 use db::Database;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{
     Emitter, Manager,
@@ -27,6 +27,7 @@ tauri_nspanel::tauri_panel!(
 );
 
 static LAST_SHOW_MS: AtomicU64 = AtomicU64::new(0);
+static BANNER_SHOWN: AtomicBool = AtomicBool::new(false);
 
 static CURRENT_MAIN_SHORTCUT: std::sync::OnceLock<std::sync::Mutex<Option<Shortcut>>> =
     std::sync::OnceLock::new();
@@ -331,6 +332,7 @@ pub fn run() {
             commands::rebind_main_shortcut,
             commands::restart_app_with_settings_open,
             commands::check_for_update,
+            commands::set_main_banner_shown,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -427,7 +429,8 @@ pub(crate) fn position_window_bottom(window: &tauri::WebviewWindow) {
         let bottom_padding = (28.0 * scale) as i32;
         let min_width = (900.0 * scale) as u32;
         let preferred_width = (1180.0 * scale) as u32;
-        let win_height = (410.0 * scale) as u32;
+        let banner_extra = if BANNER_SHOWN.load(Ordering::Relaxed) { 30.0 } else { 0.0 };
+        let win_height = ((410.0 + banner_extra) * scale) as u32;
         let win_width = preferred_width.min(work_area.size.width).max(min_width);
 
         let x = work_area.position.x + ((work_area.size.width as i32 - win_width as i32) / 2);
@@ -435,5 +438,14 @@ pub(crate) fn position_window_bottom(window: &tauri::WebviewWindow) {
 
         let _ = window.set_size(tauri::PhysicalSize::new(win_width, win_height));
         let _ = window.set_position(PhysicalPosition::new(x, y));
+    }
+}
+
+pub(crate) fn set_banner_shown_internal(app: &tauri::AppHandle, shown: bool) {
+    let prev = BANNER_SHOWN.swap(shown, Ordering::Relaxed);
+    if prev != shown {
+        if let Some(window) = app.get_webview_window("main") {
+            position_window_bottom(&window);
+        }
     }
 }

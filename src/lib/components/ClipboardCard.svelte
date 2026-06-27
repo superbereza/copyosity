@@ -158,17 +158,29 @@
     </div>
     <div class="card-actions">
       <button class="action-btn" onclick={handleCopy} title="Copy">
-        ⎘
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="5" width="9" height="9" rx="1.5" />
+          <path d="M3 11V3a1 1 0 0 1 1-1h8" />
+        </svg>
       </button>
       {#if entry.content_type === "text"}
         <button class="action-btn" onclick={handleRetag} title="Retag">
-          ↻
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+            <path d="M13.5 2v3h-3" />
+          </svg>
         </button>
       {/if}
       <button class="action-btn" onclick={handlePin} title={entry.is_pinned ? "Unpin" : "Pin"}>
-        {entry.is_pinned ? "★" : "☆"}
+        <svg viewBox="0 0 16 16" width="12" height="12" fill={entry.is_pinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="1.2" stroke-linejoin="round">
+          <path d="M8 1.5l1.96 4 4.4.65-3.18 3.1.75 4.38L8 11.55 4.07 13.62l.75-4.38L1.64 6.15l4.4-.65z" />
+        </svg>
       </button>
-      <button class="action-btn delete" onclick={handleDelete} title="Delete">×</button>
+      <button class="action-btn delete" onclick={handleDelete} title="Delete">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <path d="M4 4l8 8M12 4l-8 8" />
+        </svg>
+      </button>
     </div>
   </div>
 
@@ -294,11 +306,13 @@
   .card:hover .card-actions { opacity: 1; }
 
   .action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
-    color: var(--fg-muted);
+    color: rgba(255, 255, 255, 0.35);
     cursor: pointer;
-    font-size: var(--text-md);
     padding: 2px var(--space-1);
     border-radius: var(--radius-sm);
     line-height: 1;

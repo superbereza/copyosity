@@ -64,7 +64,7 @@ cd copyosity
 npm install
 npm run tauri build
 # result: src-tauri/target/release/bundle/macos/Copyosity.app
-#         src-tauri/target/release/bundle/dmg/Copyosity_0.4.3_aarch64.dmg
+#         src-tauri/target/release/bundle/dmg/Copyosity_0.4.4_aarch64.dmg
 ```
 
 Then drag `Copyosity.app` into `/Applications`. On first launch macOS may complain that

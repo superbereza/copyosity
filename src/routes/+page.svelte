@@ -38,6 +38,13 @@
       (singleClickAction === "paste" || doubleClickAction === "paste"),
   );
 
+  // Tell Rust to grow/shrink the main window by the banner's height so the
+  // bottom row of cards still fits when the banner is shown, and there's no
+  // dead vertical space when it isn't.
+  $effect(() => {
+    invoke("set_main_banner_shown", { shown: pasteWillFail });
+  });
+
   async function loadBehaviorSettings() {
     try {
       const s = await getAppSettings();
