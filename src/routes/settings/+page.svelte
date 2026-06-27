@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import type { AppSettings, ExcludedApp, ModelCatalog, ModelOption } from "$lib/types";
   import {
     addExcludedApp,
@@ -284,39 +285,19 @@
 
   let modelDirty = $derived(settings.ollama_model !== savedModel);
 
-  // Tauri 2 picks the closest [data-tauri-drag-region] ancestor on mousedown,
-  // so tagging a container that holds a button steals the click and starts a
-  // window drag. Solution: only tag elements that contain NO interactive
-  // descendants — so leaf text/icon nodes drag, containers don't.
-  function dragRegion(node: HTMLElement) {
-    const INTERACTIVE = "button, input, select, textarea, a, label, [contenteditable]";
-    function apply(el: Element) {
-      if (!(el instanceof HTMLElement)) return;
-      const isInteractive = el.matches(INTERACTIVE);
-      const containsInteractive = !!el.querySelector(INTERACTIVE);
-      if (!isInteractive && !containsInteractive && !el.closest(INTERACTIVE)) {
-        el.setAttribute("data-tauri-drag-region", "");
-      } else {
-        el.removeAttribute("data-tauri-drag-region");
-      }
-      for (const child of Array.from(el.children)) apply(child);
-    }
-    apply(node);
-
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const added of Array.from(m.addedNodes)) {
-          if (added instanceof HTMLElement) apply(added);
-        }
-      }
-    });
-    observer.observe(node, { childList: true, subtree: true });
-
-    return { destroy: () => observer.disconnect() };
+  // data-tauri-drag-region is unreliable on NSPanel (and steals clicks from
+  // any interactive descendant). Explicit startDragging() on mousedown is the
+  // recommended pattern: only fires when the press is outside an interactive
+  // element, so buttons/inputs keep their clicks.
+  const DRAG_BLOCKLIST = "button, input, select, textarea, a, label, [contenteditable]";
+  function startDrag(e: MouseEvent) {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest(DRAG_BLOCKLIST)) return;
+    getCurrentWindow().startDragging();
   }
 </script>
 
-<div class="settings-page" use:dragRegion>
+<div class="settings-page" onmousedown={startDrag} role="presentation">
 
   {#if restartRequired}
     <div class="restart-banner">
