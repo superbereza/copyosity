@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
+  import { emit, listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import type { ClickAction, ClipboardEntry, Collection } from "$lib/types";
   import {
@@ -234,7 +234,10 @@
 
 <div class="app" class:visible>
   {#if pasteWillFail}
-    <button class="a11y-banner" type="button" onclick={() => openSettingsWindow()}>
+    <button class="a11y-banner" type="button" onclick={async () => {
+      await openSettingsWindow();
+      setTimeout(() => emit("show-permissions"), 250);
+    }}>
       <span class="a11y-banner-dot"></span>
       <span class="a11y-banner-text">
         Paste won't work — Accessibility permission required. Click to fix.

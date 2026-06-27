@@ -177,6 +177,10 @@
       handleCheckForUpdate();
     });
 
+    const unlistenShowPermissions = listen("show-permissions", () => {
+      activeTab = "permissions";
+    });
+
     // Auto-poll accessibility while not granted — user may grant in System
     // Settings while this window is open and shouldn't need to restart or
     // click Recheck. Stops polling once granted; next Settings open re-checks.
@@ -196,6 +200,7 @@
       unlistenPull.then((fn) => fn());
       unlistenPullDone.then((fn) => fn());
       unlistenUpdateCheck.then((fn) => fn());
+      unlistenShowPermissions.then((fn) => fn());
       clearInterval(accessibilityTimer);
     };
   });
