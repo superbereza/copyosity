@@ -289,7 +289,11 @@
   // any interactive descendant). Explicit startDragging() on mousedown is the
   // recommended pattern: only fires when the press is outside an interactive
   // element, so buttons/inputs keep their clicks.
-  const DRAG_BLOCKLIST = "button, input, select, textarea, a, label, [contenteditable]";
+  //
+  // <label> is intentionally NOT in the blocklist: our settings rows wrap the
+  // title/input/hint in a wide <label>, so blocking it would kill drag across
+  // half the window. Click directly on the input to focus.
+  const DRAG_BLOCKLIST = "button, input, select, textarea, a, [contenteditable]";
   function startDrag(e: MouseEvent) {
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest(DRAG_BLOCKLIST)) return;
